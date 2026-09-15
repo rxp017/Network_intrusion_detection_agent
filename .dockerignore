@@ -1,0 +1,9 @@
+.git
+.venv
+.playwright
+.test-tmp
+data/raw
+data/synthetic
+__pycache__
+.pytest_cache
+docs/images

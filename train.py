@@ -1,441 +1,270 @@
-#!/usr/bin/env python3
-"""
-train.py -- end-to-end training pipeline for UNSW-NB15 intrusion detection.
+"""Reproducible benchmark training. No test-set tuning; see docs/MODEL_CARD.md."""
 
-Run it from the directory that contains the two dataset files:
-
-    python train.py
-
-Expected inputs (working directory):
-    UNSW_NB15_training-set.csv
-    UNSW_NB15_testing-set.csv
-
-What it produces (all under ./artifacts/):
-    scaler.pkl             fitted StandardScaler for the numeric features
-    columns.json           final post-encoding training column order
-    numeric_columns.json   (convenience) raw columns the scaler applies to
-    classifier.pkl         XGBoost multiclass 'attack_cat' classifier
-    label_encoder.pkl      (convenience) int <-> attack_cat name mapping
-    isoforest.pkl          IsolationForest fitted on normal traffic only;
-                           .decision_function() = anomaly score
-                           (more negative = more anomalous)
-    class_report.json      per-class precision/recall/f1 on the test set
-    explainability.json    top-8 features per attack_cat
-    limitations.json       classes with fewer than 50 test samples
-
-Dependencies: pandas, numpy, scikit-learn, xgboost, joblib. No deep learning.
-Hyper-parameters are deliberately conservative so the whole script finishes
-well inside 5 minutes on a laptop CPU.
-"""
-
+import argparse
+import hashlib
 import json
-import os
-import sys
+import platform
+import shutil
+import tempfile
 import time
+from datetime import datetime, timezone
+from pathlib import Path
 
 import joblib
 import numpy as np
 import pandas as pd
+import sklearn
 import xgboost as xgb
 from sklearn.ensemble import IsolationForest
-from sklearn.metrics import accuracy_score, classification_report
-from sklearn.preprocessing import LabelEncoder, StandardScaler
-from sklearn.utils.class_weight import compute_sample_weight
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, f1_score, roc_auc_score
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import LabelEncoder
 
-# --------------------------------------------------------------------------
-# Configuration
-# --------------------------------------------------------------------------
-TRAIN_CSV = "UNSW_NB15_training-set.csv"
-TEST_CSV = "UNSW_NB15_testing-set.csv"
-ARTIFACT_DIR = "artifacts"
+from model import ROOT, STRIPPED_COLUMNS, FeatureEncoder
 
-TARGET_BINARY = "label"        # 0 = normal, 1 = attack
-TARGET_MULTI = "attack_cat"   # multiclass target, includes "Normal"
-NORMAL_CLASS = "Normal"
-
-RANDOM_STATE = 42
-TOP_K_FEATURES = 8            # features per class in explainability.json
-LOW_SUPPORT_THRESHOLD = 50    # test samples below this -> limitations.json
-
-_T0 = time.time()
+SEED = 42
 
 
-def log(msg):
-    """Timestamped progress print."""
-    print(f"[{time.time() - _T0:7.1f}s] {msg}", flush=True)
+def save_json(path, obj):
+    Path(path).write_text(json.dumps(obj, indent=2, allow_nan=False), encoding="utf-8", newline="\n")
 
 
-def artifact(fname):
-    return os.path.join(ARTIFACT_DIR, fname)
+def digest(path):
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
-def save_json(obj, path):
-    """json.dump with transparent numpy-scalar conversion."""
-    def _to_native(o):
-        if isinstance(o, np.generic):        # np.float32 / np.int64 / ...
-            return o.item()
-        raise TypeError(f"{type(o).__name__} is not JSON serializable")
-
-    with open(path, "w", encoding="utf-8") as fh:
-        json.dump(obj, fh, indent=2, default=_to_native)
-    log(f"Saved {path}")
-
-
-# --------------------------------------------------------------------------
-# 1) Loading and validation
-# --------------------------------------------------------------------------
-def load_csv(path):
-    """Load one UNSW-NB15 CSV; exit with a clear message on failure."""
-    try:
-        df = pd.read_csv(path)
-    except FileNotFoundError:
-        print(f"\nERROR: '{path}' was not found in the working directory "
-              f"({os.getcwd()}).\n"
-              "This script expects both UNSW-NB15 files to sit next to it:\n"
-              f"  - {TRAIN_CSV}\n"
-              f"  - {TEST_CSV}\n"
-              "Download them (UNSW Canberra / Kaggle mirror), place them "
-              "here, and re-run.")
-        sys.exit(1)
-    except (pd.errors.ParserError, pd.errors.EmptyDataError) as exc:
-        print(f"\nERROR: '{path}' could not be parsed as a CSV: {exc}")
-        sys.exit(1)
-    log(f"Loaded {path}: {len(df):,} rows x {df.shape[1]} columns")
-    return df
+def validate(frame, name):
+    if frame.empty or not {"label", "attack_cat", "proto", "service", "state"}.issubset(frame):
+        raise ValueError(f"{name}: empty or missing required columns")
+    if frame.isna().any().any():
+        raise ValueError(f"{name}: missing values must be resolved explicitly")
+    frame["attack_cat"] = frame["attack_cat"].str.strip()
+    if not (frame["label"] == (frame["attack_cat"] != "Normal").astype(int)).all():
+        raise ValueError(f"{name}: binary and multiclass targets disagree")
+    numeric = frame.drop(columns=["proto", "service", "state", "attack_cat"])
+    if not np.isfinite(numeric.to_numpy(dtype=float)).all() or (numeric < 0).any().any():
+        raise ValueError(f"{name}: non-finite or negative features")
+    return frame
 
 
-def drop_id_and_validate(df, name):
-    """Drop 'id' if present; require both target columns or exit cleanly."""
-    if "id" in df.columns:
-        df = df.drop(columns="id")
-        log(f"{name}: dropped 'id' column")
-
-    missing = [c for c in (TARGET_BINARY, TARGET_MULTI) if c not in df.columns]
-    if missing:
-        print(f"\nERROR: {name} is missing required target column(s): "
-              f"{missing}")
-        print(f"All available columns in the {name} ({len(df.columns)}):")
-        for c in df.columns:
-            print(f"    - {c!r}")
-        print(f"\nBoth '{TARGET_BINARY}' (binary) and '{TARGET_MULTI}' "
-              "(multiclass) are required; cannot continue.")
-        sys.exit(1)
-    return df
-
-
-# --------------------------------------------------------------------------
-# 2) Feature engineering (auto-detected, nothing hardcoded)
-# --------------------------------------------------------------------------
-def _is_categorical_dtype(series):
-    kind = str(series.dtype)
-    return kind in ("object", "category", "str") or kind.startswith("string")
-
-
-def build_feature_matrices(train_df, test_df):
-    """
-    Split features from targets, one-hot encode categorical features
-    (auto-detected by dtype) and scale numeric ones. The scaler is fitted
-    on TRAIN only (no test leakage). The test set is reindexed to the exact
-    final training column list; missing dummy columns are filled with 0.
-    """
-    feature_cols = [c for c in train_df.columns
-                    if c not in (TARGET_BINARY, TARGET_MULTI)]
-
-    missing_in_test = [c for c in feature_cols if c not in test_df.columns]
-    if missing_in_test:
-        print(f"ERROR: test set is missing training feature column(s): "
-              f"{missing_in_test}")
-        sys.exit(1)
-
-    cat_cols = [c for c in feature_cols if _is_categorical_dtype(train_df[c])]
-    num_cols = [c for c in feature_cols if c not in cat_cols]
-    log(f"Auto-detected {len(cat_cols)} categorical feature(s) {cat_cols} "
-        f"and {len(num_cols)} numeric feature(s)")
-
-    X_train_raw = train_df[feature_cols]
-    X_test_raw = test_df[feature_cols]
-
-    # ---- scale numeric columns (fit on train only) ----------------------
-    scaler = StandardScaler()
-    Xtr_num = pd.DataFrame(scaler.fit_transform(X_train_raw[num_cols]),
-                           columns=num_cols, index=X_train_raw.index)
-    Xte_num = pd.DataFrame(scaler.transform(X_test_raw[num_cols]),
-                          columns=num_cols, index=X_test_raw.index)
-
-    # ---- one-hot encode categorical columns ------------------------------
-    Xtr_dum = pd.get_dummies(X_train_raw[cat_cols], columns=cat_cols,
-                             dtype=float)
-    Xte_dum = pd.get_dummies(X_test_raw[cat_cols], columns=cat_cols,
-                             dtype=float)
-
-    X_train = pd.concat([Xtr_num, Xtr_dum], axis=1)
-    final_columns = list(X_train.columns)      # canonical column order
-
-    # ---- align the test set to the training columns ---------------------
-    X_test_pre = pd.concat([Xte_num, Xte_dum], axis=1)
-    filled_cols = [c for c in final_columns if c not in X_test_pre.columns]
-    dropped_cols = [c for c in X_test_pre.columns
-                    if c not in set(final_columns)]
-    X_test = X_test_pre.reindex(columns=final_columns, fill_value=0)
-    if filled_cols:
-        log(f"Filled {len(filled_cols)} dummy column(s) absent from the "
-            f"test set with 0 (e.g., {filled_cols[:5]})")
-    if dropped_cols:
-        log(f"Dropped {len(dropped_cols)} test-only dummy column(s) "
-            f"(categories unseen in training, e.g., {dropped_cols[:5]})")
-
-    # ---- safety net: no NaN may reach the models ------------------------
-    for name, X in (("training", X_train), ("test", X_test)):
-        n_nan = int(X.isna().sum().sum())
-        if n_nan:
-            log(f"WARNING: filled {n_nan:,} missing value(s) in {name} "
-                "features with 0")
-    X_train = X_train.fillna(0.0).astype(np.float32)
-    X_test = X_test.fillna(0.0).astype(np.float32)
-
-    log(f"Feature matrices: train {X_train.shape}, test {X_test.shape}")
-    return X_train, X_test, final_columns, scaler, num_cols
-
-
-# --------------------------------------------------------------------------
-# Main pipeline
-# --------------------------------------------------------------------------
 def main():
-    os.makedirs(ARTIFACT_DIR, exist_ok=True)
-
-    # ---- step 1: load ----------------------------------------------------
-    log("Step 1/7: loading UNSW-NB15 CSVs")
-    train_df = load_csv(TRAIN_CSV)
-    test_df = load_csv(TEST_CSV)
-    train_df = drop_id_and_validate(train_df, "training set")
-    test_df = drop_id_and_validate(test_df, "test set")
-
-    # defensive trim of the multiclass target strings
-    for df in (train_df, test_df):
-        df[TARGET_MULTI] = df[TARGET_MULTI].astype(str).str.strip()
-
-    y_label_train = train_df[TARGET_BINARY]
-    y_label_test = test_df[TARGET_BINARY]
-    y_attack_train = train_df[TARGET_MULTI]
-    y_attack_test = test_df[TARGET_MULTI]
-
-    # ---- step 2: features ------------------------------------------------
-    log("Step 2/7: encoding categorical features + scaling numeric ones")
-    X_train, X_test, final_columns, scaler, num_cols = \
-        build_feature_matrices(train_df, test_df)
-
-    joblib.dump(scaler, artifact("scaler.pkl"))
-    save_json(final_columns, artifact("columns.json"))
-    # convenience for inference: which columns scaler.pkl must be applied
-    # to (every other column in columns.json is a 0/1 dummy)
-    save_json(num_cols, artifact("numeric_columns.json"))
-
-    # ---- step 3: XGBoost on attack_cat ------------------------------------
-    log("Step 3/7: training XGBoost classifier on 'attack_cat'")
-    t = time.time()
-    # Explicit label encoding keeps compatibility across xgboost versions;
-    # the fitted encoder is saved so integer predictions map back to names.
-    label_enc = LabelEncoder()
-    y_train_enc = label_enc.fit_transform(y_attack_train)
-    log(f"{len(label_enc.classes_)} classes: "
-        f"{', '.join(map(str, label_enc.classes_))}")
-
-    # class imbalance: 'balanced' sample weights (rarer classes upweighted)
-    sample_weight = compute_sample_weight("balanced", y_attack_train)
-    log(f"Sample weights: min={sample_weight.min():.3f}, "
-        f"max={sample_weight.max():.3f}")
-
-    classifier = xgb.XGBClassifier(
-        n_estimators=200,        # conservative for the <5 min CPU budget;
-        max_depth=6,             # raise these for more accuracy if you like
-        learning_rate=0.2,
-        subsample=0.8,
-        colsample_bytree=0.8,
-        tree_method="hist",      # fast histogram split finding on CPU
-        n_jobs=-1,
-        random_state=RANDOM_STATE,
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--data-dir", type=Path, default=ROOT / "data" / "raw")
+    parser.add_argument("--output", type=Path, default=ROOT / "artifacts")
+    parser.add_argument("--replay-output", type=Path, default=ROOT / "data" / "replay.csv")
+    args = parser.parse_args()
+    started = time.perf_counter()
+    paths = {s: args.data_dir / f"UNSW_NB15_{s}-set.csv" for s in ("training", "testing")}
+    frames = {s: validate(pd.read_csv(p), s) for s, p in paths.items()}
+    if len(frames["training"]) == 82332 and len(frames["testing"]) == 175341:
+        print("Mirror filenames reversed; using published 175341/82332 split sizes.", flush=True)
+        frames["training"], frames["testing"] = frames["testing"], frames["training"]
+        paths["training"], paths["testing"] = paths["testing"], paths["training"]
+    train, test = frames["training"], frames["testing"]
+    print(f"Loaded training={len(train):,}; test={len(test):,}", flush=True)
+    if len(train) != 175341 or len(test) != 82332:
+        raise ValueError(
+            "Expected published split sizes: 175341 training, 82332 test. Refusing demo or swapped splits."
+        )
+    features = [c for c in train if c not in STRIPPED_COLUMNS]
+    if len(features) != 42 or set(features) != set(test.columns) - set(STRIPPED_COLUMNS):
+        raise ValueError("Expected matching 42-feature schemas")
+    train_hashes = pd.util.hash_pandas_object(train[features], index=False)
+    test_hashes = pd.util.hash_pandas_object(test[features], index=False)
+    overlap = test_hashes.isin(set(train_hashes))
+    # Remove exact feature duplicates crossing the split BEFORE fitting any model.
+    train = train.loc[~train_hashes.isin(set(test_hashes))].copy()
+    removed = len(frames["training"]) - len(train)
+    duplicate_train_rows = int(train.duplicated(features).sum())
+    train = train.drop_duplicates(features).copy()
+    fit, calibration = train_test_split(train, test_size=0.2, random_state=SEED, stratify=train.attack_cat)
+    encoder = FeatureEncoder().fit(fit)
+    x_fit, x_cal, x_test = [encoder.transform(f) for f in (fit, calibration, test)]
+    label_encoder = LabelEncoder().fit(fit.attack_cat)
+    classes = list(label_encoder.classes_)
+    y_fit = label_encoder.transform(fit.attack_cat)
+    counts = fit.attack_cat.value_counts()
+    weights = np.sqrt(len(fit) / (len(classes) * fit.attack_cat.map(counts).to_numpy()))
+    print("Training classifier on fit partition (80%); test set is never used for fitting.", flush=True)
+    candidates = []
+    validation_trials = []
+    for name, candidate_weights in (("unweighted", None), ("sqrt_balanced", weights)):
+        candidate = xgb.XGBClassifier(
+            n_estimators=240,
+            max_depth=6,
+            learning_rate=0.12,
+            subsample=0.85,
+            colsample_bytree=0.85,
+            tree_method="hist",
+            n_jobs=4,
+            random_state=SEED,
+            eval_metric="mlogloss",
+        )
+        candidate.fit(x_fit, y_fit, sample_weight=candidate_weights)
+        cal_prediction = label_encoder.inverse_transform(candidate.predict(x_cal).astype(int))
+        score = float(f1_score(calibration.attack_cat, cal_prediction, average="macro"))
+        validation_trials.append({"weighting": name, "validation_macro_f1": score})
+        candidates.append(candidate)
+        print(f"Validation {name}: macro F1={score:.4f}", flush=True)
+    selected_index = int(np.argmax([t["validation_macro_f1"] for t in validation_trials]))
+    classifier = candidates[selected_index]
+    forest = IsolationForest(n_estimators=160, contamination="auto", n_jobs=2, random_state=SEED)
+    forest.fit(x_fit.loc[fit.label == 0])
+    normal_cal = x_cal.loc[calibration.label == 0]
+    # Retain the complete calibration distribution for identical serving percentiles.
+    reference = np.sort(forest.decision_function(normal_cal))
+    threshold = float(np.quantile(reference, 0.01))
+    cal_attack_scores = 1 - classifier.predict_proba(normal_cal)[:, classes.index("Normal")]
+    review_threshold = float(np.quantile(cal_attack_scores, 0.99))
+    print("Evaluating untouched test split.", flush=True)
+    probas = classifier.predict_proba(x_test)
+    predictions = label_encoder.inverse_transform(probas.argmax(axis=1))
+    anomaly = forest.decision_function(x_test)
+    binary_truth = (test.label == 1).to_numpy()
+    binary_predictions = predictions != "Normal"
+    tn, fp, fn, tp = confusion_matrix(binary_truth, binary_predictions, labels=[False, True]).ravel()
+    report = classification_report(
+        test.attack_cat, predictions, labels=classes, output_dict=True, zero_division=0
     )
-    classifier.fit(X_train, y_train_enc, sample_weight=sample_weight)
-    joblib.dump(classifier, artifact("classifier.pkl"))
-    joblib.dump(label_enc, artifact("label_encoder.pkl"))
-    log(f"XGBoost fit done in {time.time() - t:.1f}s")
-
-    # ---- step 4: IsolationForest on normal traffic ------------------------
-    log("Step 4/7: training IsolationForest on normal (label == 0) traffic")
-    t = time.time()
-    normal_train_mask = (y_label_train == 0)
-    n_normal = int(normal_train_mask.sum())
-    if n_normal == 0:
-        print("ERROR: training set contains no rows with label == 0 "
-              "(normal traffic); IsolationForest cannot be trained.")
-        sys.exit(1)
-    isoforest = IsolationForest(
-        n_estimators=200,
-        contamination="auto",
-        random_state=RANDOM_STATE,
-        n_jobs=-1,
-    )
-    isoforest.fit(X_train.loc[normal_train_mask])   # normal rows ONLY
-    joblib.dump(isoforest, artifact("isoforest.pkl"))
-    log(f"IsolationForest fitted on {n_normal:,} normal rows in "
-        f"{time.time() - t:.1f}s")
-
-    # Sanity check on the held-out test set. decision_function() is the
-    # anomaly score used at inference: more negative = more anomalous.
-    anomaly_scores = isoforest.decision_function(X_test)
-    normal_test = (y_label_test == 0).to_numpy()
-    if normal_test.any() and (~normal_test).any():
-        log("Anomaly-score sanity check on test set: mean score "
-            f"normal={anomaly_scores[normal_test].mean():+.4f} | "
-            f"attack={anomaly_scores[~normal_test].mean():+.4f} "
-            "(more negative = more anomalous)")
-
-    # ---- anomaly bounds & zero-day calibration -----------------------------
-    # 1. Compute anomaly_bounds from the training set's normal rows
-    normal_train_scores = isoforest.decision_function(X_train.loc[normal_train_mask])
-    b_min, b_max = float(np.min(normal_train_scores)), float(np.max(normal_train_scores))
-    anomaly_bounds = {"min": b_min, "max": b_max}
-    save_json(anomaly_bounds, artifact("anomaly_bounds.json"))
-
-    # 2. Compute zero-day heuristic false-positive rate on held-out normal test rows
-    normal_test_scores = isoforest.decision_function(X_test.loc[y_label_test == 0])
-    denom = (b_max - b_min) if b_max > b_min else 1.0
-    norm_normal_test = np.clip((b_max - normal_test_scores) / denom, 0.0, 1.0)
-    zero_day_fpr = float(np.mean(norm_normal_test >= 0.75))
-    n_normal_test = int(len(normal_test_scores))
-    zero_day_calibration = {
-        "threshold": 0.75,
-        "false_positive_rate_on_held_out_normal": zero_day_fpr,
-        "sample_size": n_normal_test,
+    normal = ~binary_truth
+    candidates = (predictions == "Normal") & (anomaly < threshold)
+    review = (1 - probas[:, classes.index("Normal")] >= review_threshold) | candidates
+    review_tp, review_fp = int(np.sum(review & binary_truth)), int(np.sum(review & normal))
+    majority = str(fit.attack_cat.mode()[0])
+    majority_accuracy = float(np.mean(test.attack_cat == majority))
+    evaluation = {
+        "dataset": "UNSW-NB15 public mirror, published train/test split",
+        "test_rows": len(test),
+        "fit_rows": len(fit),
+        "calibration_rows": len(calibration),
+        "accuracy": float(accuracy_score(test.attack_cat, predictions)),
+        "macro_f1": report["macro avg"]["f1-score"],
+        "weighted_f1": report["weighted avg"]["f1-score"],
+        "majority_baseline": {"class": majority, "accuracy": majority_accuracy},
+        "binary_detection": {
+            "precision": float(tp / max(tp + fp, 1)),
+            "recall": float(tp / max(tp + fn, 1)),
+            "false_positive_rate": float(fp / max(fp + tn, 1)),
+            "roc_auc": float(roc_auc_score(binary_truth, 1 - probas[:, classes.index("Normal")])),
+            "confusion_matrix": [[int(tn), int(fp)], [int(fn), int(tp)]],
+        },
+        "anomaly": {
+            "threshold": threshold,
+            "target_calibration_fpr": 0.01,
+            "normal_calibration_rows": len(reference),
+            "test_anomaly_only_fpr": float(np.mean(anomaly[normal] < threshold)),
+            "test_joint_candidate_fpr": float(np.mean(candidates[normal])),
+            "test_joint_candidate_count": int(candidates.sum()),
+        },
+        "review_policy": {
+            "rule": "P(attack) >= validation-normal 99th percentile OR anomaly candidate",
+            "attack_score_threshold": review_threshold,
+            "target_classifier_calibration_fpr": 0.01,
+            "test_recall": float(review_tp / binary_truth.sum()),
+            "test_false_positive_rate": float(review_fp / normal.sum()),
+            "test_precision": float(review_tp / max(review_tp + review_fp, 1)),
+            "test_review_count": int(review.sum()),
+            "note": "Queue policy does not change raw class predictions or certify unqueued flows as safe.",
+        },
+        "classes": classes,
+        "class_report": report,
+        "selection": {
+            "criterion": "Highest validation macro F1; no test-set model selection",
+            "trials": validation_trials,
+            "selected": validation_trials[selected_index]["weighting"],
+        },
+        "confusion_matrix": confusion_matrix(test.attack_cat, predictions, labels=classes).tolist(),
+        "data_audit": {
+            "original_train_rows": len(frames["training"]),
+            "test_rows_overlapping_original_train": int(overlap.sum()),
+            "removed_train_rows_overlapping_test": removed,
+            "remaining_cross_split_overlap": 0,
+            "removed_within_train_duplicate_feature_rows": duplicate_train_rows,
+            "train_duplicate_feature_rows": int(train.duplicated(features).sum()),
+            "test_duplicate_feature_rows": int(test.duplicated(features).sum()),
+        },
+        "calibration_accuracy": float(
+            accuracy_score(
+                calibration.attack_cat, label_encoder.inverse_transform(classifier.predict(x_cal).astype(int))
+            )
+        ),
     }
-
-    # ---- step 5: evaluate --------------------------------------------------
-    log("Step 5/7: evaluating classifier on the test set")
-    y_pred = label_enc.inverse_transform(
-        np.asarray(classifier.predict(X_test), dtype=int))
-    accuracy = accuracy_score(y_attack_test, y_pred)
-    print(f"\nTest accuracy: {accuracy:.4f}\n")
-
-    report_labels = sorted(set(map(str, label_enc.classes_))
-                           | set(map(str, y_attack_test.unique())))
-    print(classification_report(y_attack_test, y_pred,
-                                labels=report_labels, zero_division=0))
-    report_dict = classification_report(y_attack_test, y_pred,
-                                        labels=report_labels,
-                                        zero_division=0, output_dict=True)
-    save_json(report_dict, artifact("class_report.json"))
-
-    # ---- step 6: per-class top features ------------------------------------
-    log("Step 6/7: ranking top features per attack class")
-    # score(feature) = global XGBoost importance(feature)
-    #               * |mean(feature | class) - mean(feature | reference)|
-    # Reference is the 'Normal' rows for attack classes. For the 'Normal'
-    # class itself the difference to itself would be identically zero, so
-    # its reference is the mean over all attack rows instead.
-    global_importance = pd.Series(classifier.feature_importances_,
-                                  index=final_columns, dtype=float)
-    class_means = X_train.groupby(y_attack_train.to_numpy()).mean()
-
-    if NORMAL_CLASS in class_means.index:
-        normal_mean = class_means.loc[NORMAL_CLASS]
-    else:
-        log(f"WARNING: no '{NORMAL_CLASS}' class in training data; using "
-            "overall feature means as the reference instead")
-        normal_mean = X_train.mean(axis=0)
-
-    is_attack = (y_attack_train.to_numpy() != NORMAL_CLASS)
-    attacks_mean = (X_train[is_attack].mean(axis=0)
-                    if is_attack.any() else None)
-
-    explainability = {}
-    for cls in map(str, label_enc.classes_):
-        if cls == NORMAL_CLASS:
-            if attacks_mean is not None:
-                scores = global_importance * \
-                    (class_means.loc[cls] - attacks_mean).abs()
-            else:                       # degenerate: no attack rows at all
-                scores = global_importance
-        else:
-            scores = global_importance * \
-                (class_means.loc[cls] - normal_mean).abs()
-        top = scores.sort_values(ascending=False).head(TOP_K_FEATURES)
-        explainability[cls] = [{"feature": feat, "importance": float(val)}
-                                for feat, val in top.items()]
-        preview = ", ".join(f"{feat} ({val:.3f})"
-                            for feat, val in top.head(3).items())
-        log(f"  {cls:<15} top-3: {preview}")
-    save_json(explainability, artifact("explainability.json"))
-
-    # ---- step 7: low-support classes ---------------------------------------
-    log("Step 7/7: flagging classes with low test support")
-    train_counts = y_attack_train.value_counts()
-    test_counts = y_attack_test.value_counts()
-    all_classes = sorted(set(map(str, label_enc.classes_))
-                         | set(map(str, y_attack_test.unique())))
-
-    low_confidence = []
-    for cls in all_classes:
-        support = int(test_counts.get(cls, 0))
-        if support < LOW_SUPPORT_THRESHOLD:
-            low_confidence.append({"attack_cat": cls, "test_support": support})
-    save_json({"low_confidence_classes": low_confidence,
-               "zero_day_calibration": zero_day_calibration},
-              artifact("limitations.json"))
-    if low_confidence:
-        print(f"\nLow-confidence classes (< {LOW_SUPPORT_THRESHOLD} test "
-              "samples):")
-        for item in low_confidence:
-            print(f"  - {item['attack_cat']}: {item['test_support']} "
-                  "test samples")
-    else:
-        print(f"\nAll classes have >= {LOW_SUPPORT_THRESHOLD} test samples.")
-
-    # ---- final summary ------------------------------------------------------
-    print("\n" + "=" * 66)
-    print("FINAL SUMMARY")
-    print("=" * 66)
-    print(f"Classes found ({len(all_classes)}): "
-          f"{', '.join(all_classes)}\n")
-    print(f"{'attack_cat':<16}{'train rows':>12}{'test rows':>12}")
-    print("-" * 40)
-    for cls in all_classes:
-        print(f"{cls:<16}"
-              f"{int(train_counts.get(cls, 0)):>12,}"
-              f"{int(test_counts.get(cls, 0)):>12,}")
-    print("-" * 40)
-    print(f"{'TOTAL':<16}{len(train_df):>12,}{len(test_df):>12,}")
-
-    print(f"\nXGBoost multiclass test accuracy : {accuracy:.4f}")
-    print(f"IsolationForest trained on       : {n_normal:,} normal rows "
-          "(anomaly score = decision_function, lower = more anomalous)")
-    print(f"IsolationForest anomaly bounds   : min={anomaly_bounds['min']:+.4f}, "
-          f"max={anomaly_bounds['max']:+.4f} (from training normal rows)")
-    print(f"Zero-day heuristic test FPR      : {zero_day_fpr:.4f} "
-          f"({zero_day_fpr * 100:.2f}% of {n_normal_test:,} normal test rows score >= 0.75)")
-
-    artifacts = [
-        ("scaler.pkl", "fitted StandardScaler for numeric features"),
-        ("columns.json", "final post-encoding column order"),
-        ("numeric_columns.json", "columns scaler.pkl applies to (extra)"),
-        ("label_encoder.pkl", "attack_cat <-> int mapping (extra)"),
-        ("classifier.pkl", "XGBoost attack_cat classifier"),
-        ("isoforest.pkl", "IsolationForest on normal traffic"),
-        ("anomaly_bounds.json", "min/max anomaly scores on normal rows"),
-        ("class_report.json", "per-class precision/recall/f1"),
-        ("explainability.json", "top-8 features per class"),
-        ("limitations.json", "classes with low test support"),
-    ]
-    print("\nArtifacts written to './artifacts':")
-    for fname, desc in artifacts:
-        path = artifact(fname)
-        if os.path.exists(path):
-            size_kb = os.path.getsize(path) / 1024.0
-            print(f"  - {fname:<22}{size_kb:>10,.1f} KB   {desc}")
-        else:
-            print(f"  - {fname:<22}{'MISSING':>10}   {desc}")
-
-    log("All done.")
+    source = json.loads((args.data_dir / "source.json").read_text(encoding="utf-8"))
+    source["actual_split_hashes"] = {s: digest(p) for s, p in paths.items()}
+    source["actual_split_files"] = {s: p.name for s, p in paths.items()}
+    metadata = {
+        "classes": classes,
+        "seed": SEED,
+        "dataset_source": source,
+        "normal_calibration_scores": reference.tolist(),
+        "anomaly_threshold": threshold,
+        "review_threshold": review_threshold,
+        "risk_formula": "round(60 * (1 - P(Normal)) + 40 * benign_anomaly_percentile)",
+        "created_utc": datetime.now(timezone.utc).isoformat(),
+        "versions": {
+            "python": platform.python_version(),
+            "sklearn": sklearn.__version__,
+            "xgboost": xgb.__version__,
+            "numpy": np.__version__,
+            "pandas": pd.__version__,
+        },
+    }
+    importance = pd.Series(classifier.feature_importances_, index=encoder.columns).sort_values(
+        ascending=False
+    )
+    global_features = [{"feature": k, "importance": float(v)} for k, v in importance.head(12).items()]
+    limitations = {
+        "deployment": "Research prototype; benchmark replay, no live packet capture or automatic blocking.",
+        "probabilities": "Uncalibrated classifier scores; risk is an analyst prioritization heuristic.",
+        "novelty": "Anomaly candidates are not validated zero-day detections.",
+        "explanations": "TreeSHAP is additive in class raw margin, not probability or causation.",
+        "low_confidence_classes": [
+            {"attack_cat": c, "test_support": int(report[c]["support"]), "recall": report[c]["recall"]}
+            for c in classes
+            if report[c]["support"] < 100 or report[c]["recall"] < 0.5
+        ],
+        "generalization": "A 2015 lab benchmark cannot establish performance on today's production networks.",
+    }
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    # Stage the entire bundle before replacing files; manifest is published last.
+    with tempfile.TemporaryDirectory(dir=args.output.parent, prefix="training-") as temp:
+        stage = Path(temp)
+        joblib.dump(encoder, stage / "encoder.pkl")
+        joblib.dump(forest, stage / "isoforest.pkl")
+        classifier.save_model(stage / "classifier.ubj")
+        save_json(stage / "metadata.json", metadata)
+        save_json(stage / "evaluation.json", evaluation)
+        save_json(
+            stage / "explainability.json", {"scope": "Global model gain", "top_features": global_features}
+        )
+        save_json(stage / "limitations.json", limitations)
+        manifest = {"format": 2, "sha256": {p.name: digest(p) for p in sorted(stage.iterdir())}}
+        args.output.mkdir(parents=True, exist_ok=True)
+        for path in stage.iterdir():
+            shutil.copy2(path, args.output / path.name)
+        save_json(args.output / "manifest.json", manifest)
+    # A deterministic representative sample; selected by ground truth for demo coverage.
+    replay = test.groupby("attack_cat", group_keys=False).sample(n=40, random_state=SEED)
+    replay = replay.sample(frac=1, random_state=SEED)
+    args.replay_output.parent.mkdir(parents=True, exist_ok=True)
+    replay.to_csv(args.replay_output, index=False, lineterminator="\n")
+    save_json(
+        args.replay_output.with_suffix(".json"),
+        {
+            "source": "40 held-out rows per ground-truth class, shuffled with seed 42",
+            "balanced_demo_sample": True,
+            "rows": len(replay),
+            "sha256": digest(args.replay_output),
+            "not_for_metrics": True,
+        },
+    )
+    print(
+        json.dumps(
+            {k: evaluation[k] for k in ("accuracy", "macro_f1", "binary_detection", "data_audit")}, indent=2
+        )
+    )
+    print(f"Training and evaluation completed in {time.perf_counter() - started:.1f}s", flush=True)
 
 
 if __name__ == "__main__":
-    main() 
+    main()

@@ -17,3 +17,18 @@ __pycache__/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Local data downloads and verification tools (never publish)
+data/raw/
+data/synthetic/
+.playwright/
+.test-tmp/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.env
+.env.*
+!.env.example
+verification/*.log
+.verify-venv/

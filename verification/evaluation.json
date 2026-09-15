@@ -1,0 +1,21 @@
+{
+  "model_id": "0013990bc956",
+  "test_rows": 82332,
+  "recomputed": {
+    "accuracy": 0.7288660545110043,
+    "macro_f1": 0.5384764464052417,
+    "review_recall": 0.894224830142063,
+    "review_false_positive_rate": 0.045162162162162164
+  },
+  "runtime": {
+    "python": "3.14.7",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "cpu": "Intel64 Family 6 Model 186 Stepping 2, GenuineIntel"
+  },
+  "single_flow_with_shap_ms": {
+    "samples": 100,
+    "median": 30.732800005353056,
+    "p95": 35.13846499772626
+  },
+  "measurement_scope": "Local sequential inference, includes encoding and TreeSHAP; not a network throughput benchmark."
+}

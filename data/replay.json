@@ -1,0 +1,7 @@
+{
+  "source": "40 held-out rows per ground-truth class, shuffled with seed 42",
+  "balanced_demo_sample": true,
+  "rows": 400,
+  "sha256": "cf9530ba62446864108d9c1976975dde0c46306d4a8e84324c7c40627da5923d",
+  "not_for_metrics": true
+}

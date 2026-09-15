@@ -1,200 +1,296 @@
-"""
-main.py -- FastAPI demo API serving the models trained by train.py.
-
-Run (after train.py has produced ./artifacts/):
-    uvicorn main:app --reload      # development
-    python main.py                 # plain uvicorn on 0.0.0.0:8000
-
-The app fails fast at startup if artifacts are missing. /ws/stream
-additionally needs UNSW_NB15_testing-set.csv in the working directory.
-Requires fastapi >= 0.93 (lifespan). CORS is wide open -- demo only.
-"""
+"""Local research API and deterministic benchmark replay."""
 
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import Dict, Union
+from pathlib import Path
+from urllib.parse import urlparse
 
-import os
 import pandas as pd
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
-from pydantic import RootModel
+from fastapi import Body, FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
 
-from model import ModelBundle
+from model import ROOT, STRIPPED_COLUMNS, ModelBundle
 
-Scalar = Union[str, int, float, bool, None]
-
-
-class PredictPayload(RootModel[Dict[str, Scalar]]):
-    """Arbitrary key-value mapping of feature names to scalar values."""
-    pass
-
-logging.basicConfig(level=logging.INFO,
-                    format="%(asctime)s %(levelname)s %(message)s")
-logger = logging.getLogger("unsw-api")
-
-ARTIFACTS_DIR = "artifacts"
-TEST_CSV = "UNSW_NB15_testing-set.csv"     # /ws/stream only
-STREAM_DELAY_SECONDS = 0.4
+logger = logging.getLogger("nida")
+ARTIFACTS_DIR = Path(os.getenv("NIDA_ARTIFACTS_DIR", str(ROOT / "artifacts")))
+REPLAY_CSV = ROOT / "data" / "replay.csv"
+MAX_BODY = 256 * 1024
+MAX_STREAMS = 8
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Load all artifacts once; fail fast with a clear error otherwise."""
-    bundle = ModelBundle(artifacts_dir=ARTIFACTS_DIR)
-    app.state.bundle = bundle
-    logger.info("Model ready -- %d classes: %s", len(bundle.classes),
-                ", ".join(bundle.classes))
-    logger.info("Held-out test accuracy (class_report.json): %s",
-                bundle.class_report.get("accuracy"))
-
+async def lifespan(application):
+    application.state.bundle = await run_in_threadpool(ModelBundle, ARTIFACTS_DIR)
+    application.state.active_streams = 0
+    application.state.inference_slots = asyncio.Semaphore(4)
     try:
-        app.state.test_df = pd.read_csv(TEST_CSV)
-        logger.info("Loaded test set for streaming: %d rows from %s",
-                    len(app.state.test_df), TEST_CSV)
-    except FileNotFoundError:
-        logger.warning("'%s' not found at startup; /ws/stream will be unavailable.",
-                       TEST_CSV)
-        app.state.test_df = None
-    except Exception as exc:
-        logger.warning("Failed to load '%s' at startup (%s); /ws/stream will be unavailable.",
-                       TEST_CSV, exc)
-        app.state.test_df = None
-
-    yield  # nothing to tear down
+        replay = pd.read_csv(REPLAY_CSV)
+        if replay.empty:
+            raise ValueError("Empty replay")
+        for row in replay.to_dict("records"):
+            application.state.bundle.validate_row(row)
+        application.state.replay = replay
+    except (OSError, ValueError) as exc:
+        logger.warning("Replay unavailable: %s", exc)
+        application.state.replay = None
+    yield
 
 
 app = FastAPI(
-    title="UNSW-NB15 Intrusion Detection API",
-    description="XGBoost attack_cat classifier + IsolationForest anomaly "
-                "scorer. POST a raw CSV-style feature row to /predict, or "
-                "open /ws/stream to watch the test set flow by.",
-    version="1.0.0",
+    title="NIDA | Network Intrusion Detection Agent",
+    version="2.0.0",
+    description="Validated flow inference, per-flow TreeSHAP and labelled benchmark replay.",
     lifespan=lifespan,
 )
 
-# Demo only: allow every origin. allow_credentials stays False because
-# credentialed requests cannot be combined with a wildcard origin.
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+
+class RequestBoundary:
+    """Bound chunked and Content-Length bodies before JSON parsing."""
+
+    def __init__(self, application):
+        self.application = application
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.application(scope, receive, send)
+        chunks, size = [], 0
+        while True:
+            message = await receive()
+            if message["type"] == "http.disconnect":
+                return
+            size += len(message.get("body", b""))
+            if size > MAX_BODY:
+                return await JSONResponse({"detail": "Request body exceeds 256 KiB"}, 413)(
+                    scope, receive, send
+                )
+            chunks.append(message)
+            if not message.get("more_body", False):
+                break
+        iterator = iter(chunks)
+
+        async def buffered_receive():
+            try:
+                return next(iterator)
+            except StopIteration:
+                return await receive()
+
+        await self.application(scope, buffered_receive, send)
 
 
-def get_bundle() -> ModelBundle:
+app.add_middleware(RequestBoundary)
+
+
+@app.middleware("http")
+async def security_headers(request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["X-Frame-Options"] = "DENY"
+    # Swagger UI uses a CDN; dashboard and its assets are entirely local.
+    if request.url.path not in ("/docs", "/redoc", "/docs/oauth2-redirect"):
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
+            "connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'"
+        )
+    return response
+
+
+app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
+
+
+def bundle():
     return app.state.bundle
 
 
-@app.get("/", response_class=FileResponse)
-def root():
-    """Serve the SOC Dashboard if available, else return API endpoint index."""
-    if os.path.exists("dashboard.html"):
-        return FileResponse("dashboard.html")
-    return {"service": "UNSW-NB15 IDS",
-            "endpoints": ["/health", "/predict", "/explain/{attack_cat}",
-                          "/limitations", "/ws/stream", "/docs"]}
-
-
-@app.get("/dashboard", response_class=FileResponse)
+@app.get("/", include_in_schema=False)
+@app.get("/dashboard", include_in_schema=False)
 def dashboard():
-    """Serve the SOC dashboard HTML directly."""
-    if os.path.exists("dashboard.html"):
-        return FileResponse("dashboard.html")
-    raise HTTPException(status_code=404, detail="dashboard.html not found")
-
-
-@app.get("/api")
-def api_info():
-    """JSON index of available API endpoints."""
-    return {"service": "UNSW-NB15 IDS",
-            "endpoints": ["/health", "/predict", "/explain/{attack_cat}",
-                          "/limitations", "/ws/stream", "/docs"]}
+    return FileResponse(ROOT / "dashboard.html")
 
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "classes": get_bundle().classes}
+    return {
+        "status": "ok",
+        "model_id": bundle().model_id,
+        "classes": bundle().classes,
+        "mode": "benchmark_replay",
+        "replay_available": app.state.replay is not None,
+    }
 
 
-@app.post("/predict")
-def predict(payload: PredictPayload):
-    """Body: one raw feature row (same keys/values as a CSV row, minus
-    id/label/attack_cat). Returns the shared score_row() result."""
-    return get_bundle().score_row(payload.root)
-
-
-@app.get("/explain/{attack_cat}")
-def explain(attack_cat: str):
-    data = get_bundle().explainability
-    if attack_cat not in data:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Unknown attack_cat '{attack_cat}'. "
-                   f"Available: {sorted(data)}")
-    return {"attack_cat": attack_cat, "top_features": data[attack_cat]}
+@app.get("/metrics")
+def metrics():
+    return {"model_id": bundle().model_id, **bundle().evaluation}
 
 
 @app.get("/limitations")
 def limitations():
-    """Verbatim contents of limitations.json."""
-    return get_bundle().limitations
+    return bundle().limitations
+
+
+@app.get("/schema")
+def schema():
+    return {
+        "numeric": bundle().numeric_cols,
+        "categorical": bundle().encoder.categories,
+        "required": bundle().required_features,
+        "ignored_metadata": list(STRIPPED_COLUMNS),
+        "numeric_bounds": [0, 1e15],
+        "max_batch_size": 100,
+    }
+
+
+@app.get("/sample")
+def sample(category: str = Query("Normal")):
+    frame = app.state.replay
+    if frame is None:
+        raise HTTPException(503, "Replay data unavailable")
+    subset = frame.loc[frame.attack_cat == category]
+    if subset.empty:
+        raise HTTPException(404, "Unknown sample class")
+    row = subset.iloc[0].to_dict()
+    return {
+        "source": "Held-out benchmark sample selected by ground-truth class",
+        "true_label": row["attack_cat"],
+        "features": {k: v for k, v in row.items() if k not in STRIPPED_COLUMNS},
+    }
+
+
+@app.post("/predict")
+async def predict(payload: dict = Body(...), explain: bool = Query(True)):
+    try:
+        # Bound work dispatched to the worker pool; event loop stays responsive.
+        async with app.state.inference_slots:
+            return await run_in_threadpool(bundle().score_row, payload, explain)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@app.post("/predict/batch")
+async def predict_batch(payload: list[dict] = Body(..., min_length=1, max_length=100)):
+    try:
+        for row in payload:
+            bundle().validate_row(row)
+        async with app.state.inference_slots:
+            results = await run_in_threadpool(lambda: [bundle().score_row(row, False) for row in payload])
+        return {"count": len(results), "results": results}
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@app.get("/explain/{attack_cat}")
+def explain_class(attack_cat: str):
+    if attack_cat not in bundle().classes:
+        raise HTTPException(404, "Unknown attack class")
+    return {
+        "attack_cat": attack_cat,
+        **bundle().explainability,
+        "note": "Global gain is shared across classes. POST /predict returns per-flow TreeSHAP.",
+    }
+
+
+def origin_allowed(websocket):
+    origin = websocket.headers.get("origin")
+    if not origin:  # Command-line clients; this is not an authentication mechanism.
+        return True
+    parsed = urlparse(origin)
+    return parsed.scheme in ("http", "https") and parsed.netloc == websocket.headers.get("host")
 
 
 @app.websocket("/ws/stream")
 async def ws_stream(websocket: WebSocket):
-    """
-    On connect, load the test set and stream it row by row (wrapping back
-    to row 0 at the end). Each message is a score_row() result plus
-    row_index / timestamp / true_label. A client disconnect ends the loop
-    cleanly without crashing the server.
-    """
-    await websocket.accept()
-    df = websocket.app.state.test_df
-    if df is None:
-        await websocket.send_json(
-            {"error": f"'{TEST_CSV}' not found in the working directory; "
-                      "streaming is unavailable."})
-        await websocket.close(code=1011)
+    if not origin_allowed(websocket):
+        await websocket.close(code=1008)
         return
-
-    feature_cols = [c for c in df.columns
-                    if c not in ("id", "label", "attack_cat")]
-    n_rows = len(df)
-    if n_rows == 0:
-        await websocket.send_json(
-            {"error": "test set is empty; streaming is unavailable"})
-        await websocket.close(code=1011)
-        return
-    logger.info("/ws/stream: client connected, %d rows from %s",
-                n_rows, TEST_CSV)
-
-    i = 0
     try:
-        while True:
-            row = df.iloc[i]
-            result = get_bundle().score_row({c: row[c] for c in feature_cols})
-            true_label = row.get("attack_cat")
-            await websocket.send_json({
-                **result,
-                "row_index": i,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "true_label": (str(true_label) if pd.notna(true_label)
-                               else "unknown"),
-            })
-            await asyncio.sleep(STREAM_DELAY_SECONDS)
-            i = (i + 1) % n_rows            # wrap back to row 0
-    except WebSocketDisconnect:
-        logger.info("/ws/stream: client disconnected after %d row(s)", i)
-    except Exception:                       # never crash the server
-        logger.exception("/ws/stream: unexpected error at row %d", i)
+        interval = float(websocket.query_params.get("interval", "0.6"))
+        offset = int(websocket.query_params.get("offset", "0"))
+        if not 0.1 <= interval <= 3 or offset < 0:
+            raise ValueError()
+    except ValueError:
+        await websocket.close(code=1008)
+        return
+    category = websocket.query_params.get("category", "all")
+    if category != "all" and category not in bundle().classes:
+        await websocket.close(code=1008)
+        return
+    if app.state.active_streams >= MAX_STREAMS:
+        await websocket.close(code=1013)
+        return
+    await websocket.accept()
+    frame = app.state.replay
+    if frame is None:
+        await websocket.send_json({"error": "Replay unavailable; REST inference remains available"})
+        await websocket.close(code=1011)
+        return
+    if category != "all":
+        frame = frame.loc[frame.attack_cat == category]
+    records = frame.to_dict("records")
+    app.state.active_streams += 1
+    disconnected = asyncio.Event()
+
+    async def receive_disconnect():
+        try:
+            while True:
+                message = await websocket.receive()
+                if message["type"] == "websocket.disconnect":
+                    break
+        except WebSocketDisconnect, RuntimeError:
+            pass
+        finally:
+            disconnected.set()
+
+    receiver = asyncio.create_task(receive_disconnect())
+    try:
+        cursor = offset
+        while not disconnected.is_set():
+            row_index = cursor % len(records)
+            row = records[row_index]
+            features = {k: v for k, v in row.items() if k not in STRIPPED_COLUMNS}
+            async with app.state.inference_slots:
+                result = await run_in_threadpool(bundle().score_row, features)
+            if disconnected.is_set():
+                break
+            await websocket.send_json(
+                {
+                    **result,
+                    "event_id": f"replay-{int(row['id'])}-{cursor // len(records)}",
+                    "row_index": row_index,
+                    "next_offset": cursor + 1,
+                    "cycle": cursor // len(records),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "source": "benchmark_replay",
+                    "true_label": str(row["attack_cat"]),
+                    "protocol": str(row["proto"]),
+                    "service": str(row["service"]),
+                }
+            )
+            cursor += 1
+            try:
+                await asyncio.wait_for(disconnected.wait(), timeout=interval)
+            except TimeoutError:
+                pass
+    except WebSocketDisconnect, OSError:
+        pass
+    except Exception:
+        logger.exception("Replay stream failed")
+        try:
+            await websocket.close(code=1011)
+        except RuntimeError:
+            pass
+    finally:
+        app.state.active_streams -= 1
+        receiver.cancel()
+        await asyncio.gather(receiver, return_exceptions=True)
 
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000)
+
+    uvicorn.run(app, host=os.getenv("NIDA_HOST", "127.0.0.1"), port=int(os.getenv("NIDA_PORT", "8000")))

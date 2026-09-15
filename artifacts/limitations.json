@@ -1,25 +1,24 @@
 {
+  "deployment": "Research prototype; benchmark replay, no live packet capture or automatic blocking.",
+  "probabilities": "Uncalibrated classifier scores; risk is an analyst prioritization heuristic.",
+  "novelty": "Anomaly candidates are not validated zero-day detections.",
+  "explanations": "TreeSHAP is additive in class raw margin, not probability or causation.",
   "low_confidence_classes": [
     {
       "attack_cat": "Analysis",
-      "test_support": 24
+      "test_support": 677,
+      "recall": 0.0827178729689808
     },
     {
       "attack_cat": "Backdoor",
-      "test_support": 8
-    },
-    {
-      "attack_cat": "Shellcode",
-      "test_support": 9
+      "test_support": 583,
+      "recall": 0.09262435677530018
     },
     {
       "attack_cat": "Worms",
-      "test_support": 44
+      "test_support": 44,
+      "recall": 0.6136363636363636
     }
   ],
-  "zero_day_calibration": {
-    "threshold": 0.75,
-    "false_positive_rate_on_held_out_normal": 0.03170731707317073,
-    "sample_size": 410
-  }
+  "generalization": "A 2015 lab benchmark cannot establish performance on today's production networks."
 }

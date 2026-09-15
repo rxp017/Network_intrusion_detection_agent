@@ -1,0 +1,12 @@
+{
+  "format": 2,
+  "sha256": {
+    "classifier.ubj": "0013990bc956605fc177560b0c493c28be4719b6f04d4951feb3feaec4a3dab5",
+    "encoder.pkl": "bc279b9b3336da8e84c5cfbe713faff33b51e2d78529bccf4129c2a07a7a2cbe",
+    "evaluation.json": "31a60de089646bb280bda42c252f05b853c41bb5ef52bd13c1c41154ebb6921a",
+    "explainability.json": "365fc1c76adc37572775bd4c6c183da16309d773a25a089773f666b868548109",
+    "isoforest.pkl": "b9add7b195e6a90ffea7e7bf21961cc1f2ae42b38a3153c9c7a94ab3738b99ff",
+    "limitations.json": "83e3bd615a2f4536ec798400ee76b08aa9d02e345eeae0cc2bf084c7d090f6c6",
+    "metadata.json": "c0ea501c5353e972024a8d3537b00b9413c703bef4ee444db78b2cfc28cf2f28"
+  }
+}

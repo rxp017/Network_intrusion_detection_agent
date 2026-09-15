@@ -1,7 +1,9 @@
 """
-generate_sample_data.py -- Generates synthetic UNSW-NB15 training & testing datasets
-with exact feature names, dtypes, and attack categories.
+Synthetic format fixtures with independent random labels.
+NOT the UNSW-NB15 benchmark; NOT suitable for model performance claims.
 """
+
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -36,24 +38,15 @@ def generate_dataset(n_samples: int, is_test: bool = False) -> pd.DataFrame:
 
     attack_cats = np.random.choice(CLASSES, size=n_samples, p=class_weights)
 
-    # For testing set, ensure Worms has exactly 44 samples to match limitations.json spec
-    if is_test:
-        worms_idx = np.where(attack_cats == "Worms")[0]
-        if len(worms_idx) > 44:
-            attack_cats[worms_idx[44:]] = "Normal"
-        elif len(worms_idx) < 44:
-            non_worms = np.where(attack_cats != "Worms")[0]
-            needed = 44 - len(worms_idx)
-            to_replace = np.random.choice(non_worms, size=needed, replace=False)
-            attack_cats[to_replace] = "Worms"
-
     labels = np.where(attack_cats == "Normal", 0, 1)
 
     data = {
         "id": np.arange(1, n_samples + 1),
         "dur": np.random.exponential(scale=0.5, size=n_samples),
         "proto": np.random.choice(PROTOS, size=n_samples, p=[0.55, 0.30, 0.05, 0.04, 0.04, 0.02]),
-        "service": np.random.choice(SERVICES, size=n_samples, p=[0.50, 0.20, 0.15, 0.05, 0.03, 0.03, 0.02, 0.02]),
+        "service": np.random.choice(
+            SERVICES, size=n_samples, p=[0.50, 0.20, 0.15, 0.05, 0.03, 0.03, 0.02, 0.02]
+        ),
         "state": np.random.choice(STATES, size=n_samples, p=[0.60, 0.25, 0.10, 0.03, 0.02]),
         "spkts": np.random.poisson(lam=18, size=n_samples) + 1,
         "dpkts": np.random.poisson(lam=16, size=n_samples),
@@ -101,15 +94,16 @@ def generate_dataset(n_samples: int, is_test: bool = False) -> pd.DataFrame:
 
 
 def main():
-    print("Generating synthetic UNSW_NB15_training-set.csv (3000 rows)...")
-    train_df = generate_dataset(3000, is_test=False)
-    train_df.to_csv("UNSW_NB15_training-set.csv", index=False)
-
-    print("Generating synthetic UNSW_NB15_testing-set.csv (1000 rows)...")
-    test_df = generate_dataset(1000, is_test=True)
-    test_df.to_csv("UNSW_NB15_testing-set.csv", index=False)
-
-    print("Datasets generated successfully!")
+    # Random independent labels are useful only for format/negative controls.
+    # Never overwrite benchmark data or train published artifacts on these rows.
+    target = Path(__file__).resolve().parent / "data" / "synthetic"
+    target.mkdir(parents=True, exist_ok=True)
+    for name, count, is_test in (("training.csv", 3000, False), ("testing.csv", 1000, True)):
+        path = target / name
+        if path.exists():
+            raise FileExistsError(f"Refusing to overwrite {path}")
+        generate_dataset(count, is_test=is_test).to_csv(path, index=False)
+    print("Synthetic negative-control fixtures saved in data/synthetic. NOT benchmark evidence.")
 
 
 if __name__ == "__main__":
