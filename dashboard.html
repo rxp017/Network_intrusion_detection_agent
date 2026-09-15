@@ -1,0 +1,1040 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NIDA // Network Intrusion Detection SOC Dashboard</title>
+  <!-- Chart.js via CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <!-- Modern SOC Typography -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+
+  <style>
+    :root {
+      --bg-primary: #080b11;
+      --bg-surface: #0f172a;
+      --bg-surface-elevated: #1e293b;
+      --border-color: #1e293b;
+      --border-subtle: rgba(255, 255, 255, 0.08);
+      --accent: #00f0ff;
+      --accent-glow: rgba(0, 240, 255, 0.25);
+      --text-primary: #f8fafc;
+      --text-secondary: #94a3b8;
+      --text-muted: #64748b;
+
+      /* Risk palette */
+      --risk-low-text: #10b981;
+      --risk-low-bg: transparent;
+      --risk-med-text: #eab308;
+      --risk-med-bg: rgba(234, 179, 8, 0.12);
+      --risk-high-text: #f97316;
+      --risk-high-bg: rgba(249, 115, 22, 0.16);
+      --risk-crit-text: #ef4444;
+      --risk-crit-bg: rgba(239, 68, 68, 0.22);
+      --risk-zero-day: #fbbf24;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg-primary);
+      color: var(--text-primary);
+      font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      line-height: 1.5;
+      overflow-x: hidden;
+    }
+
+    /* Top Grid Overlay for Cyber Aesthetics */
+    body::before {
+      content: "";
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      background-image:
+        linear-gradient(rgba(0, 240, 255, 0.02) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0, 240, 255, 0.02) 1px, transparent 1px);
+      background-size: 32px 32px;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .app-container {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      padding: 16px 24px;
+      max-width: 1800px;
+      margin: 0 auto;
+      width: 100%;
+    }
+
+    /* ----------------------------------------------------------------------
+       1. Limitations Advisory Banner
+       ---------------------------------------------------------------------- */
+    #limitations-banner {
+      display: none;
+      align-items: center;
+      gap: 12px;
+      background: linear-gradient(90deg, rgba(234, 179, 8, 0.16), rgba(234, 179, 8, 0.05));
+      border: 1px solid rgba(234, 179, 8, 0.4);
+      border-left: 4px solid var(--risk-med-text);
+      padding: 10px 16px;
+      border-radius: 4px;
+      color: #fef08a;
+      font-size: 13px;
+      letter-spacing: 0.2px;
+    }
+
+    #limitations-banner .badge-alert {
+      background: rgba(234, 179, 8, 0.25);
+      border: 1px solid var(--risk-med-text);
+      color: #fff;
+      font-size: 10px;
+      font-weight: 700;
+      padding: 2px 6px;
+      border-radius: 3px;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    /* ----------------------------------------------------------------------
+       2. Header & Status Bar
+       ---------------------------------------------------------------------- */
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .brand-logo {
+      width: 32px;
+      height: 32px;
+      background: rgba(0, 240, 255, 0.1);
+      border: 1px solid var(--accent);
+      border-radius: 6px;
+      display: grid;
+      place-items: center;
+      box-shadow: 0 0 12px var(--accent-glow);
+    }
+
+    .brand-logo svg {
+      width: 18px;
+      height: 18px;
+      fill: var(--accent);
+    }
+
+    .brand-title {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      color: #fff;
+    }
+
+    .brand-subtitle {
+      font-size: 11px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .clock-display {
+      font-size: 12px;
+      color: var(--text-secondary);
+      background: rgba(15, 23, 42, 0.7);
+      padding: 6px 12px;
+      border-radius: 4px;
+      border: 1px solid var(--border-subtle);
+    }
+
+    .connection-badge {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 12px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
+      transition: all 0.3s ease;
+    }
+
+    .connection-badge.connected {
+      background: rgba(16, 185, 129, 0.15);
+      border: 1px solid rgba(16, 185, 129, 0.4);
+      color: #34d399;
+    }
+
+    .connection-badge.disconnected {
+      background: rgba(239, 68, 68, 0.18);
+      border: 1px solid rgba(239, 68, 68, 0.5);
+      color: #f87171;
+      animation: pulse-red 1.8s infinite;
+    }
+
+    .pulse-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background-color: currentColor;
+      box-shadow: 0 0 8px currentColor;
+    }
+
+    @keyframes pulse-red {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.55; }
+    }
+
+    /* ----------------------------------------------------------------------
+       3. Metrics / Counters HUD
+       ---------------------------------------------------------------------- */
+    .counters-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 14px;
+    }
+
+    .metric-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: 6px;
+      padding: 14px 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .metric-card::after {
+      content: "";
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 3px;
+      height: 100%;
+      background: var(--accent);
+      box-shadow: 0 0 8px var(--accent);
+    }
+
+    .metric-card.card-attack::after {
+      background: var(--risk-high-text);
+      box-shadow: 0 0 8px var(--risk-high-text);
+    }
+
+    .metric-card.card-critical::after {
+      background: var(--risk-crit-text);
+      box-shadow: 0 0 8px var(--risk-crit-text);
+    }
+
+    .metric-card.card-zeroday::after {
+      background: var(--risk-zero-day);
+      box-shadow: 0 0 8px var(--risk-zero-day);
+    }
+
+    .metric-label {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    .metric-value {
+      font-size: 32px;
+      font-weight: 700;
+      color: #fff;
+      letter-spacing: -0.5px;
+      font-family: 'Space Grotesk', sans-serif;
+    }
+
+    .metric-sub {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    /* ----------------------------------------------------------------------
+       4. Main Workspace (Table + Side Panels)
+       ---------------------------------------------------------------------- */
+    .workspace-layout {
+      display: grid;
+      grid-template-columns: 1fr 420px;
+      gap: 16px;
+      align-items: start;
+    }
+
+    @media (max-width: 1280px) {
+      .workspace-layout {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .panel {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: 6px;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .panel-header {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border-subtle);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: rgba(255, 255, 255, 0.02);
+    }
+
+    .panel-title {
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 1.2px;
+      text-transform: uppercase;
+      color: var(--text-secondary);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .panel-title span.indicator {
+      display: inline-block;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 6px var(--accent);
+    }
+
+    .panel-actions {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    /* ----------------------------------------------------------------------
+       5. Live Table Styling
+       ---------------------------------------------------------------------- */
+    .table-container {
+      max-height: 640px;
+      overflow-y: auto;
+      overflow-x: auto;
+    }
+
+    /* Custom high-tech scrollbar */
+    .table-container::-webkit-scrollbar,
+    .explain-body::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    .table-container::-webkit-scrollbar-thumb,
+    .explain-body::-webkit-scrollbar-thumb {
+      background: var(--bg-surface-elevated);
+      border-radius: 3px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+      font-size: 12px;
+    }
+
+    thead th {
+      position: sticky;
+      top: 0;
+      background: #0d1527;
+      color: var(--text-secondary);
+      padding: 10px 14px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      border-bottom: 1px solid var(--border-subtle);
+      z-index: 10;
+    }
+
+    tbody tr {
+      border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+      cursor: pointer;
+      transition: background 0.15s ease, transform 0.1s ease;
+    }
+
+    tbody tr:hover {
+      background-color: rgba(0, 240, 255, 0.06) !important;
+    }
+
+    tbody tr.selected {
+      outline: 1px solid var(--accent);
+      background-color: rgba(0, 240, 255, 0.12) !important;
+    }
+
+    td {
+      padding: 9px 14px;
+      white-space: nowrap;
+    }
+
+    /* Risk row tints per specification:
+       low=none, medium=yellow, high=orange, critical=red */
+    tr.risk-low {
+      background-color: transparent;
+    }
+    tr.risk-medium {
+      background-color: var(--risk-med-bg);
+    }
+    tr.risk-high {
+      background-color: var(--risk-high-bg);
+    }
+    tr.risk-critical {
+      background-color: var(--risk-crit-bg);
+    }
+
+    /* Badges */
+    .badge-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 2px 8px;
+      border-radius: 3px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .badge-risk-low {
+      color: var(--risk-low-text);
+      background: rgba(16, 185, 129, 0.12);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+    }
+    .badge-risk-medium {
+      color: var(--risk-med-text);
+      background: rgba(234, 179, 8, 0.18);
+      border: 1px solid rgba(234, 179, 8, 0.4);
+    }
+    .badge-risk-high {
+      color: var(--risk-high-text);
+      background: rgba(249, 115, 22, 0.18);
+      border: 1px solid rgba(249, 115, 22, 0.4);
+    }
+    .badge-risk-critical {
+      color: var(--risk-crit-text);
+      background: rgba(239, 68, 68, 0.25);
+      border: 1px solid rgba(239, 68, 68, 0.5);
+    }
+
+    .badge-zeroday {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: rgba(251, 191, 36, 0.25);
+      border: 1px solid #fbbf24;
+      color: #fef08a;
+      font-size: 10px;
+      font-weight: 700;
+      padding: 2px 6px;
+      border-radius: 3px;
+      margin-left: 6px;
+      letter-spacing: 0.5px;
+      animation: pulse-yellow 2s infinite;
+    }
+
+    @keyframes pulse-yellow {
+      0%, 100% { box-shadow: 0 0 0 rgba(251, 191, 36, 0); }
+      50% { box-shadow: 0 0 8px rgba(251, 191, 36, 0.5); }
+    }
+
+    /* ----------------------------------------------------------------------
+       6. Right Column (Chart + Explainability Panel)
+       ---------------------------------------------------------------------- */
+    .sidebar-stack {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .chart-container {
+      padding: 14px 16px;
+      height: 250px;
+      position: relative;
+    }
+
+    .explain-container {
+      min-height: 370px;
+    }
+
+    .explain-body {
+      padding: 16px;
+      max-height: 400px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .feature-bar-row {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .feature-meta {
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+      color: var(--text-primary);
+    }
+
+    .feature-meta .feat-name {
+      color: var(--accent);
+      font-weight: 500;
+    }
+
+    .feature-bar-track {
+      width: 100%;
+      height: 6px;
+      background: rgba(255, 255, 255, 0.06);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+
+    .feature-bar-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #00f0ff, #3b82f6);
+      border-radius: 3px;
+      box-shadow: 0 0 6px rgba(0, 240, 255, 0.5);
+      transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .placeholder-prompt {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 240px;
+      color: var(--text-muted);
+      text-align: center;
+      gap: 10px;
+      font-size: 12px;
+    }
+
+    .placeholder-prompt svg {
+      width: 32px;
+      height: 32px;
+      stroke: var(--text-muted);
+      stroke-width: 1.5;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="app-container">
+
+    <!-- 1. Model Limitations Advisory Banner -->
+    <div id="limitations-banner">
+      <span class="badge-alert">Advisory</span>
+      <span id="limitations-text">Loading model limitations...</span>
+    </div>
+
+    <!-- 2. Header & Live Connection Status -->
+    <header>
+      <div class="brand">
+        <div class="brand-logo">
+          <svg viewBox="0 0 24 24">
+            <path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 2.18l7 3.12v4.7c0 4.67-3.13 8.97-7 10.08-3.87-1.11-7-5.41-7-10.08V6.3l7-3.12zM11 7v6h2V7h-2zm0 8v2h2v-2h-2z"/>
+          </svg>
+        </div>
+        <div>
+          <h1 class="brand-title">NIDA // DEFENSE CONSOLE</h1>
+          <p class="brand-subtitle">Real-time Anomaly &amp; Hybrid Threat Telemetry</p>
+        </div>
+      </div>
+
+      <div class="header-actions">
+        <div class="clock-display" id="system-clock">UTC 00:00:00</div>
+        <div id="ws-badge" class="connection-badge disconnected">
+          <span class="pulse-dot"></span>
+          <span id="ws-status-text">INITIALIZING...</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- 3. Top Counters Panel -->
+    <section class="counters-grid">
+      <div class="metric-card">
+        <span class="metric-label">Events Processed</span>
+        <span class="metric-value" id="count-total">0</span>
+        <span class="metric-sub">Packets streaming in live</span>
+      </div>
+      <div class="metric-card card-attack">
+        <span class="metric-label">Flagged As Attack</span>
+        <span class="metric-value" id="count-attacks">0</span>
+        <span class="metric-sub">Non-Normal traffic</span>
+      </div>
+      <div class="metric-card card-critical">
+        <span class="metric-label">Critical Alerts</span>
+        <span class="metric-value" id="count-critical">0</span>
+        <span class="metric-sub">Risk Score &ge; 75</span>
+      </div>
+      <div class="metric-card card-zeroday">
+        <span class="metric-label">Zero-Day Suspects</span>
+        <span class="metric-value" id="count-zeroday">0</span>
+        <span class="metric-sub">High anomaly + Normal class</span>
+      </div>
+    </section>
+
+    <!-- 4. Main Body Grid (Table + Sidebar) -->
+    <main class="workspace-layout">
+
+      <!-- Live Stream Table -->
+      <section class="panel">
+        <div class="panel-header">
+          <div class="panel-title">
+            <span class="indicator"></span>
+            <span>Live Detection Log (Last 30 Events)</span>
+          </div>
+          <div class="panel-actions">Click row for explainability</div>
+        </div>
+
+        <div class="table-container">
+          <table id="events-table">
+            <thead>
+              <tr>
+                <th>Timestamp</th>
+                <th>Predicted Attack</th>
+                <th>True Label</th>
+                <th>Risk Score</th>
+                <th>Risk Level</th>
+              </tr>
+            </thead>
+            <tbody id="events-tbody">
+              <!-- Dynamically populated via WebSocket -->
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Right Column: Chart & Explainability -->
+      <div class="sidebar-stack">
+
+        <!-- Live Distribution Chart -->
+        <section class="panel">
+          <div class="panel-header">
+            <div class="panel-title">
+              <span class="indicator"></span>
+              <span>Predicted Attack Distribution</span>
+            </div>
+          </div>
+          <div class="chart-container">
+            <canvas id="attackChart"></canvas>
+          </div>
+        </section>
+
+        <!-- Explainability Side Panel -->
+        <section class="panel explain-container">
+          <div class="panel-header">
+            <div class="panel-title">
+              <span class="indicator" style="background: #3b82f6; box-shadow: 0 0 6px #3b82f6;"></span>
+              <span id="explain-title">Why Flagged As...</span>
+            </div>
+            <div class="panel-actions" id="explain-status">Select row</div>
+          </div>
+          <div class="explain-body" id="explain-content">
+            <div class="placeholder-prompt">
+              <svg fill="none" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M15.042 21.672L13.684 16.6m0 0l-2.51 2.225.569-9.47 5.227 7.917-3.286-.672zM12 2.25V4.5m5.834.166l-1.591 1.591M20.25 10.5H18M7.757 14.743l-1.59 1.59M6 10.5H3.75m4.007-4.243l-1.59-1.59" />
+              </svg>
+              <span>Click any traffic record on the left to inspect XGBoost and feature attribution telemetry.</span>
+            </div>
+          </div>
+        </section>
+
+      </div>
+
+    </main>
+
+  </div>
+
+  <script>
+    // -------------------------------------------------------------------------
+    // Configuration & Endpoints
+    const isHttp = window.location.protocol.startsWith("http");
+    const API_BASE = isHttp ? window.location.origin : "http://localhost:8000";
+    const WS_PROTOCOL = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const WS_HOST = isHttp ? window.location.host : "localhost:8000";
+    const WS_URL = `${WS_PROTOCOL}//${WS_HOST}/ws/stream`;
+
+    // Application state
+    let socket = null;
+    let reconnectTimeout = null;
+    const MAX_ROWS = 30;
+
+    // Metrics counters
+    let totalEvents = 0;
+    let totalAttacks = 0;
+    let totalCritical = 0;
+    let totalZeroDay = 0;
+
+    // Attack counts map for Chart.js
+    const attackCounts = {};
+
+    // Elements
+    const wsBadge = document.getElementById("ws-badge");
+    const wsStatusText = document.getElementById("ws-status-text");
+    const tbody = document.getElementById("events-tbody");
+    const countTotalEl = document.getElementById("count-total");
+    const countAttacksEl = document.getElementById("count-attacks");
+    const countCriticalEl = document.getElementById("count-critical");
+    const countZeroDayEl = document.getElementById("count-zeroday");
+    const explainTitle = document.getElementById("explain-title");
+    const explainContent = document.getElementById("explain-content");
+    const explainStatus = document.getElementById("explain-status");
+    const limitationsBanner = document.getElementById("limitations-banner");
+    const limitationsText = document.getElementById("limitations-text");
+
+    // -------------------------------------------------------------------------
+    // Live Clock Display
+    // -------------------------------------------------------------------------
+    function updateClock() {
+      const now = new Date();
+      document.getElementById("system-clock").innerText = "UTC " + now.toISOString().substring(11, 19);
+    }
+    setInterval(updateClock, 1000);
+    updateClock();
+
+    // -------------------------------------------------------------------------
+    // Initialize Chart.js Bar Chart
+    // -------------------------------------------------------------------------
+    const ctx = document.getElementById('attackChart').getContext('2d');
+    const attackChart = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: [],
+        datasets: [{
+          label: 'Detections',
+          data: [],
+          backgroundColor: function(context) {
+            const label = context.chart.data.labels[context.dataIndex] || '';
+            if (label.toLowerCase() === 'normal') return 'rgba(16, 185, 129, 0.65)';
+            return 'rgba(0, 240, 255, 0.65)';
+          },
+          borderColor: function(context) {
+            const label = context.chart.data.labels[context.dataIndex] || '';
+            if (label.toLowerCase() === 'normal') return '#10b981';
+            return '#00f0ff';
+          },
+          borderWidth: 1,
+          borderRadius: 3,
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            backgroundColor: '#0f172a',
+            titleFont: { family: 'JetBrains Mono', size: 11 },
+            bodyFont: { family: 'JetBrains Mono', size: 11 },
+            borderColor: 'rgba(255,255,255,0.1)',
+            borderWidth: 1
+          }
+        },
+        scales: {
+          x: {
+            grid: { display: false },
+            ticks: {
+              color: '#94a3b8',
+              font: { family: 'JetBrains Mono', size: 10 },
+              maxRotation: 45,
+              minRotation: 25
+            }
+          },
+          y: {
+            beginAtZero: true,
+            grid: { color: 'rgba(255, 255, 255, 0.05)' },
+            ticks: {
+              color: '#64748b',
+              font: { family: 'JetBrains Mono', size: 10 },
+              precision: 0
+            }
+          }
+        }
+      }
+    });
+
+    function updateChart(category) {
+      if (!attackCounts[category]) {
+        attackCounts[category] = 0;
+      }
+      attackCounts[category] += 1;
+
+      const labels = Object.keys(attackCounts).sort();
+      const data = labels.map(l => attackCounts[l]);
+
+      attackChart.data.labels = labels;
+      attackChart.data.datasets[0].data = data;
+      attackChart.update('none'); // Update smoothly without flickering
+    }
+
+    // -------------------------------------------------------------------------
+    // Limitations Fetch on Load
+    // -------------------------------------------------------------------------
+    async function fetchLimitations() {
+      try {
+        const res = await fetch(`${API_BASE}/limitations`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+
+        let classListStr = "";
+        if (data.low_confidence_classes && Array.isArray(data.low_confidence_classes)) {
+          classListStr = data.low_confidence_classes.map(item => {
+            if (typeof item === 'string') return item;
+            if (item.attack_cat) return `${item.attack_cat} (${item.test_support} samples)`;
+            return JSON.stringify(item);
+          }).join(', ');
+        } else {
+          classListStr = Object.keys(data).join(', ');
+        }
+
+        if (classListStr) {
+          limitationsText.innerHTML = `<strong>Model has limited training data for:</strong> ${classListStr} — treat detections in these categories with lower confidence.`;
+          limitationsBanner.style.display = "flex";
+        }
+      } catch (err) {
+        console.warn("Could not fetch limitations from API:", err);
+      }
+    }
+
+    // -------------------------------------------------------------------------
+    // Explainability Fetch on Row Click
+    // -------------------------------------------------------------------------
+    async function loadExplainability(attackCat, rowData) {
+      explainTitle.innerText = `Why Flagged As ${attackCat}`;
+      explainStatus.innerText = "Loading...";
+      explainContent.innerHTML = `
+        <div style="color: var(--text-muted); padding: 20px 0; text-align: center;">
+          Fetching explainability telemetry for <strong>${attackCat}</strong>...
+        </div>
+      `;
+
+      try {
+        const res = await fetch(`${API_BASE}/explain/${encodeURIComponent(attackCat)}`);
+        if (!res.ok) {
+          throw new Error(`Category not found (HTTP ${res.status})`);
+        }
+        const responseData = await res.json();
+        const topFeatures = Array.isArray(responseData) ? responseData : (responseData.top_features || []);
+        explainStatus.innerText = `Top ${topFeatures.length} features`;
+
+        if (!Array.isArray(topFeatures) || topFeatures.length === 0) {
+          explainContent.innerHTML = `<div style="color: var(--text-muted);">No explainability weights available for ${attackCat}.</div>`;
+          return;
+        }
+
+        const maxScore = Math.max(...topFeatures.map(f => f.importance || 0), 0.0001);
+
+        let html = `
+          <div style="background: rgba(255,255,255,0.03); border: 1px solid var(--border-subtle); border-radius: 4px; padding: 10px; margin-bottom: 6px; font-size: 11px;">
+            <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+              <span style="color:var(--text-secondary)">Anomaly Score:</span>
+              <strong style="color:${rowData.anomaly_score < 0 ? 'var(--risk-crit-text)' : 'var(--risk-low-text)'}">${rowData.anomaly_score}</strong>
+            </div>
+            <div style="display:flex; justify-content:space-between;">
+              <span style="color:var(--text-secondary)">Risk Level:</span>
+              <strong style="text-transform:uppercase">${rowData.risk_level} (${rowData.risk_score}/100)</strong>
+            </div>
+          </div>
+        `;
+
+        topFeatures.forEach(item => {
+          const featName = item.feature || "unknown";
+          const featVal = typeof item.importance === 'number' ? item.importance.toFixed(4) : item.importance;
+          const percentage = Math.min(100, Math.max(5, (item.importance / maxScore) * 100));
+
+          html += `
+            <div class="feature-bar-row">
+              <div class="feature-meta">
+                <span class="feat-name">${featName}</span>
+                <span>${featVal}</span>
+              </div>
+              <div class="feature-bar-track">
+                <div class="feature-bar-fill" style="width: ${percentage}%"></div>
+              </div>
+            </div>
+          `;
+        });
+
+        explainContent.innerHTML = html;
+
+      } catch (err) {
+        explainStatus.innerText = "Error";
+        explainContent.innerHTML = `
+          <div style="color: var(--risk-crit-text); padding: 10px 0;">
+            Failed to load explainability: ${err.message}
+          </div>
+        `;
+      }
+    }
+
+    // -------------------------------------------------------------------------
+    // WebSocket Event Handling & Table Rendering
+    // -------------------------------------------------------------------------
+    function handleStreamEvent(data) {
+      // 1. Increment counters
+      totalEvents++;
+      countTotalEl.innerText = totalEvents.toLocaleString();
+
+      const predicted = String(data.predicted_attack_cat || "Unknown");
+      const isAttack = predicted.toLowerCase() !== "normal";
+      if (isAttack) {
+        totalAttacks++;
+        countAttacksEl.innerText = totalAttacks.toLocaleString();
+      }
+
+      const riskLevel = String(data.risk_level || "low").toLowerCase();
+      if (riskLevel === "critical") {
+        totalCritical++;
+        countCriticalEl.innerText = totalCritical.toLocaleString();
+      }
+
+      const isZeroDay = Boolean(data.is_potential_zero_day);
+      if (isZeroDay) {
+        totalZeroDay++;
+        countZeroDayEl.innerText = totalZeroDay.toLocaleString();
+      }
+
+      // 2. Update Live Bar Chart
+      updateChart(predicted);
+
+      // 3. Format timestamp
+      let formattedTime = data.timestamp || "";
+      if (formattedTime.includes("T")) {
+        formattedTime = formattedTime.substring(11, 23); // HH:MM:SS.mmm
+      }
+
+      // 4. Construct table row
+      const tr = document.createElement("tr");
+      tr.className = `risk-${riskLevel}`;
+
+      // Zero-day badge
+      const zeroDayBadge = isZeroDay ? `<span class="badge-zeroday">⚠️ ZERO-DAY?</span>` : "";
+
+      tr.innerHTML = `
+        <td style="color: var(--text-secondary);">${formattedTime}</td>
+        <td>
+          <strong style="color: ${isAttack ? '#fff' : 'var(--text-secondary)'}">${predicted}</strong>
+          ${zeroDayBadge}
+        </td>
+        <td style="color: var(--text-muted);">${data.true_label || "-"}</td>
+        <td>
+          <span style="font-weight: 700; color: #fff;">${data.risk_score}</span>
+          <span style="color: var(--text-muted); font-size: 10px;">/100</span>
+        </td>
+        <td>
+          <span class="badge-pill badge-risk-${riskLevel}">${riskLevel}</span>
+        </td>
+      `;
+
+      // Click to explain
+      tr.addEventListener("click", () => {
+        document.querySelectorAll("#events-tbody tr").forEach(r => r.classList.remove("selected"));
+        tr.classList.add("selected");
+        loadExplainability(predicted, data);
+      });
+
+      // Insert at the top (newest first)
+      if (tbody.firstChild) {
+        tbody.insertBefore(tr, tbody.firstChild);
+      } else {
+        tbody.appendChild(tr);
+      }
+
+      // Keep only last 30 rows
+      while (tbody.children.length > MAX_ROWS) {
+        tbody.removeChild(tbody.lastChild);
+      }
+    }
+
+    // -------------------------------------------------------------------------
+    // Reconnecting WebSocket Client
+    // -------------------------------------------------------------------------
+    function connectWebSocket() {
+      if (reconnectTimeout) {
+        clearTimeout(reconnectTimeout);
+        reconnectTimeout = null;
+      }
+
+      wsStatusText.innerText = "CONNECTING...";
+      wsBadge.className = "connection-badge disconnected";
+
+      socket = new WebSocket(WS_URL);
+
+      socket.onopen = function() {
+        wsStatusText.innerText = "STREAM ONLINE";
+        wsBadge.className = "connection-badge connected";
+      };
+
+      socket.onmessage = function(event) {
+        try {
+          const message = JSON.parse(event.data);
+          if (message.error) {
+            console.error("Server stream error:", message.error);
+            return;
+          }
+          handleStreamEvent(message);
+        } catch (e) {
+          console.error("JSON parse error on WebSocket event:", e);
+        }
+      };
+
+      socket.onclose = function(event) {
+        wsStatusText.innerText = "RECONNECTING IN 2s...";
+        wsBadge.className = "connection-badge disconnected";
+        reconnectTimeout = setTimeout(connectWebSocket, 2000);
+      };
+
+      socket.onerror = function(error) {
+        socket.close();
+      };
+    }
+
+    // -------------------------------------------------------------------------
+    // Entry Point on Page Load
+    // -------------------------------------------------------------------------
+    window.addEventListener("DOMContentLoaded", () => {
+      fetchLimitations();
+      connectWebSocket();
+    });
+  </script>
+</body>
+</html>

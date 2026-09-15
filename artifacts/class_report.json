@@ -1,0 +1,75 @@
+{
+  "Analysis": {
+    "precision": 0.0,
+    "recall": 0.0,
+    "f1-score": 0.0,
+    "support": 24.0
+  },
+  "Backdoor": {
+    "precision": 0.0,
+    "recall": 0.0,
+    "f1-score": 0.0,
+    "support": 8.0
+  },
+  "DoS": {
+    "precision": 0.0,
+    "recall": 0.0,
+    "f1-score": 0.0,
+    "support": 57.0
+  },
+  "Exploits": {
+    "precision": 0.12962962962962962,
+    "recall": 0.05185185185185185,
+    "f1-score": 0.07407407407407407,
+    "support": 135.0
+  },
+  "Fuzzers": {
+    "precision": 0.038461538461538464,
+    "recall": 0.014492753623188406,
+    "f1-score": 0.021052631578947368,
+    "support": 69.0
+  },
+  "Generic": {
+    "precision": 0.22794117647058823,
+    "recall": 0.16062176165803108,
+    "f1-score": 0.1884498480243161,
+    "support": 193.0
+  },
+  "Normal": {
+    "precision": 0.42782834850455137,
+    "recall": 0.802439024390244,
+    "f1-score": 0.5581000848176421,
+    "support": 410.0
+  },
+  "Reconnaissance": {
+    "precision": 0.0,
+    "recall": 0.0,
+    "f1-score": 0.0,
+    "support": 51.0
+  },
+  "Shellcode": {
+    "precision": 0.0,
+    "recall": 0.0,
+    "f1-score": 0.0,
+    "support": 9.0
+  },
+  "Worms": {
+    "precision": 0.0,
+    "recall": 0.0,
+    "f1-score": 0.0,
+    "support": 44.0
+  },
+  "accuracy": 0.368,
+  "macro avg": {
+    "precision": 0.08238606930663077,
+    "recall": 0.10294053915233152,
+    "f1-score": 0.08416766384949796,
+    "support": 1000.0
+  },
+  "weighted avg": {
+    "precision": 0.23955611609953575,
+    "recall": 0.368,
+    "f1-score": 0.2766444870228736,
+    "support": 1000.0
+  }
+}

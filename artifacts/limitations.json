@@ -1,0 +1,25 @@
+{
+  "low_confidence_classes": [
+    {
+      "attack_cat": "Analysis",
+      "test_support": 24
+    },
+    {
+      "attack_cat": "Backdoor",
+      "test_support": 8
+    },
+    {
+      "attack_cat": "Shellcode",
+      "test_support": 9
+    },
+    {
+      "attack_cat": "Worms",
+      "test_support": 44
+    }
+  ],
+  "zero_day_calibration": {
+    "threshold": 0.75,
+    "false_positive_rate_on_held_out_normal": 0.03170731707317073,
+    "sample_size": 410
+  }
+}
