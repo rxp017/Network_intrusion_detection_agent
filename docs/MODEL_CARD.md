@@ -58,6 +58,7 @@ Global gain is separately exposed for model-wide inspection. Neither global gain
 6. The two engines and XAI run on CPU; timings are local sequential measurements, not throughput or concurrency guarantees.
 7. Serialized sklearn objects must be trusted. Hashes detect corruption relative to the bundled manifest; they do not authenticate a maliciously replaced bundle.
 8. The application has no authentication, durable incident store, packet capture, SIEM integration, or automated containment.
+9. Narrative text is LLM-generated prose describing the model's own output; it is not an independent judgment and should be read alongside the raw evidence panel, not in place of it.
 
 ## Next experiments
 

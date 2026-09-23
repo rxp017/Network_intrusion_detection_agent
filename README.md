@@ -44,6 +44,22 @@ Open **http://127.0.0.1:8000**. The trained models and 400-flow replay are inclu
 
 The server binds to loopback by default. `NIDA_HOST`, `NIDA_PORT`, and `NIDA_ARTIFACTS_DIR` override the bind address, port, and trusted artifact directory. Restart after replacing a model bundle. Do not expose the unauthenticated API publicly.
 
+### AI Narrative Layer (optional)
+
+NIDA runs **fully offline with zero API keys and zero internet access** by default.
+
+An optional, on-demand plain-English narrative layer can be enabled by creating a `.env` file (copy from `.env.example`) or setting environment variables:
+
+- `GROQ_API_KEY`: Groq API key for low-latency (~300ms) plain-English flow explanations.
+- `GEMINI_API_KEY`: Google Gemini API key.
+- `LLM_PROVIDER`: Provider mode (`"waterfall"`, `"groq"`, `"gemini"`, or `"none"`, default: `"waterfall"` when keys are set).
+  - **Waterfall mode**: Tries Groq first for speed. If Groq hits a rate limit (HTTP 429), quota exhaustion, or error, it seamlessly and automatically fails over to Gemini!
+- `GROQ_MODEL` / `GEMINI_MODEL`: Optional model overrides (defaults to `llama-3.3-70b-versatile` and `gemini-2.5-flash`).
+
+**Zero Event-Loop Blocking**: LLM requests run on a fully asynchronous non-blocking pipeline (`httpx.AsyncClient` with `asyncio.sleep` rate-limiting). Outbound LLM calls never freeze the FastAPI event loop, and `/ws/stream` replay streaming continues smoothly without latency spikes or pauses.
+
+When `LLM_PROVIDER=none` or if no keys are supplied, the narrative layer is gracefully marked unavailable in the UI, and all inference, replay, and SHAP features continue functioning offline. LLM calls are strictly on-demand (triggered only when clicking "✦ Explain in plain English" on a selected flow) and are never invoked during replay streaming or batch inference.
+
 ### Optional container
 
 ```bash

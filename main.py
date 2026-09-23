@@ -14,6 +14,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
+import llm_narrator
 from model import ROOT, STRIPPED_COLUMNS, ModelBundle
 
 logger = logging.getLogger("nida")
@@ -163,11 +164,42 @@ def sample(category: str = Query("Normal")):
 
 
 @app.post("/predict")
-async def predict(payload: dict = Body(...), explain: bool = Query(True)):
+async def predict(payload: dict = Body(...), explain: bool = Query(True), narrate: bool = Query(False)):
     try:
+        # Resilient unwrap if client passes a previously scored flow result object
+        if "explanation" in payload and isinstance(payload.get("explanation"), dict):
+            raw = payload["explanation"].get("raw_features")
+            if raw and isinstance(raw, dict):
+                payload = raw
+
         # Bound work dispatched to the worker pool; event loop stays responsive.
         async with app.state.inference_slots:
-            return await run_in_threadpool(bundle().score_row, payload, explain)
+            result = await run_in_threadpool(bundle().score_row, payload, explain or narrate)
+        if narrate:
+            if not llm_narrator.is_available():
+                result["narrative"] = None
+                result["narrative_status"] = "unavailable"
+            else:
+                try:
+                    narrative = await llm_narrator.aget_flow_narrative(payload, result)
+                    if (
+                        narrative
+                        and narrative.get("provider") != "none"
+                        and not str(narrative.get("provider", "")).startswith("failed:")
+                        and narrative.get("summary") != llm_narrator.FALLBACK_SUMMARY
+                    ):
+                        result["narrative"] = narrative
+                        result["narrative_status"] = "ok"
+                    else:
+                        result["narrative"] = None
+                        result["narrative_status"] = "unavailable"
+                except Exception as exc:
+                    logger.warning("Failed to generate narrative: %s", exc)
+                    result["narrative"] = None
+                    result["narrative_status"] = "unavailable"
+            if not explain and "explanation" in result:
+                del result["explanation"]
+        return result
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
 

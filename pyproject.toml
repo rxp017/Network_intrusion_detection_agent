@@ -1,7 +1,9 @@
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+addopts = "--basetemp=.test-tmp/pytest"
 markers = ["browser: real Chromium end-to-end tests (opt in with NIDA_BROWSER_TESTS=1)"]
+
 
 [tool.ruff]
 target-version = "py314"

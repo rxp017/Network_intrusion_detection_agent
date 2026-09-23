@@ -15,6 +15,7 @@ const state = {
   history: [],
   selected: null,
   generation: 0,
+  view: "analyst",
 };
 const number = (n) => Number(n).toLocaleString();
 const percent = (n) => (100 * Number(n)).toFixed(1) + "%";
@@ -238,27 +239,115 @@ function renderDistribution() {
   }
   $("distribution").replaceChildren(fragment);
 }
-function inspect(row) {
-  state.selected = row;
-  $("inspection-empty").hidden = true;
-  $("inspection").hidden = false;
-  $("selected-verdict").textContent = row.predicted_attack_cat;
-  $("selected-risk").textContent = row.risk_score;
-  $("selected-source").textContent =
-    percent(row.confidence) +
-    " model score · " +
-    (row.source === "benchmark_replay" ? row.event_id : "submitted flow") +
-    (row.review_recommended ? " · REVIEW QUEUE" : " · below review threshold");
-  $("selected-candidate").hidden = !row.is_anomaly_candidate;
-  $("classifier-points").textContent =
-    row.risk_components.classifier.toFixed(1) + " / 60";
-  $("anomaly-points").textContent =
-    row.risk_components.anomaly.toFixed(1) + " / 40";
-  $("classifier-bar").value = row.risk_components.classifier;
-  $("anomaly-bar").value = row.risk_components.anomaly;
-  $("action").textContent = row.recommended_action;
-  $("warnings").textContent = row.warnings.join(" · ");
-  const features = row.explanation?.features || [];
+function switchView(mode) {
+  state.view = mode;
+  const isBriefing = mode === "briefing";
+  $("view-analyst-btn").classList.toggle("active", !isBriefing);
+  $("view-analyst-btn").setAttribute("aria-selected", !isBriefing);
+  $("view-briefing-btn").classList.toggle("active", isBriefing);
+  $("view-briefing-btn").setAttribute("aria-selected", isBriefing);
+  $("workspace-mode-label").textContent = isBriefing ? "Executive briefing" : "Detection workspace";
+
+  document.body.classList.toggle("mode-briefing-active", isBriefing);
+  $("inspector-heading").closest(".inspector").hidden = isBriefing;
+  $("briefing-panel").hidden = !isBriefing;
+  $("distribution").closest(".distribution").hidden = isBriefing;
+
+  if (state.selected) {
+    inspect(state.selected);
+  }
+}
+
+function renderNarrative(narrative) {
+  if (!narrative) return;
+  const isUnavailable = narrative.unavailable || narrative.provider === "none";
+
+  $("briefing-narrative-card").classList.toggle("narrative-unavailable", isUnavailable);
+  $("briefing-narrative-text").textContent = narrative.summary;
+  $("briefing-provider-badge").textContent = isUnavailable ? "Offline fallback" : narrative.provider;
+  if (narrative.recommended_action) {
+    $("briefing-action-text").textContent = narrative.recommended_action;
+  }
+
+  $("analyst-narrative-card").hidden = false;
+  $("analyst-narrative-card").classList.toggle("narrative-unavailable", isUnavailable);
+  $("analyst-narrative-text").textContent = narrative.summary;
+  $("analyst-provider-badge").textContent = isUnavailable ? "Offline fallback" : narrative.provider;
+}
+
+async function requestNarrative() {
+  if (!state.selected) return;
+  const row = state.selected;
+
+  const btnBriefing = $("briefing-narrate-btn");
+  const btnAnalyst = $("analyst-narrate-btn");
+  const statusBriefing = $("briefing-narrate-status");
+  const statusAnalyst = $("analyst-narrate-status");
+
+  if (row._narrative) {
+    renderNarrative(row._narrative);
+    return;
+  }
+
+  btnBriefing.disabled = true;
+  btnAnalyst.disabled = true;
+  statusBriefing.textContent = "Generating narrative…";
+  statusAnalyst.textContent = "Generating narrative…";
+
+  try {
+    const rawFeatures = row.explanation?.raw_features || row._rawPayload;
+    const payload = rawFeatures ? { ...rawFeatures } : { ...row };
+    const nonFeatures = [
+      "id", "label", "attack_cat", "event_id", "row_index", "next_offset", "cycle",
+      "timestamp", "source", "true_label", "protocol", "service", "_narrative",
+      "model_id", "predicted_attack_cat", "confidence", "class_probabilities",
+      "attack_probability", "anomaly_score", "anomaly_percentile", "risk_score",
+      "risk_level", "risk_components", "is_anomaly_candidate", "review_recommended",
+      "review_threshold", "warnings", "recommended_action", "explanation", "inference_ms",
+      "narrative", "narrative_status"
+    ];
+    for (const k of nonFeatures) {
+      delete payload[k];
+    }
+
+    const data = await getJSON("/predict?narrate=true", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    if (data.narrative && data.narrative_status === "ok") {
+      row._narrative = data.narrative;
+      statusBriefing.textContent = "Narrative ready";
+      statusAnalyst.textContent = "Narrative ready";
+    } else {
+      row._narrative = {
+        summary: "AI narrative unavailable — no API key configured",
+        recommended_action: row.recommended_action || "Follow standard security review protocol.",
+        provider: "none",
+        unavailable: true,
+      };
+      statusBriefing.textContent = "Offline mode";
+      statusAnalyst.textContent = "Offline mode";
+    }
+    renderNarrative(row._narrative);
+  } catch (err) {
+    row._narrative = {
+      summary: "AI narrative generation failed — see technical evidence.",
+      recommended_action: row.recommended_action || "Follow standard security review protocol.",
+      provider: "none",
+      unavailable: true,
+    };
+    renderNarrative(row._narrative);
+    statusBriefing.textContent = "Offline mode";
+    statusAnalyst.textContent = "Offline mode";
+  } finally {
+    btnBriefing.disabled = false;
+    btnAnalyst.disabled = false;
+  }
+}
+
+function buildContributionsFragment(features) {
   const maximum = Math.max(
     ...features.map((f) => Math.abs(f.contribution)),
     0.00001,
@@ -288,8 +377,68 @@ function inspect(row) {
     );
     fragment.append(line);
   }
-  $("contributions").replaceChildren(fragment);
+  return fragment;
+}
+
+function inspect(row) {
+  state.selected = row;
+  $("inspection-empty").hidden = true;
+  $("inspection").hidden = false;
+  $("selected-verdict").textContent = row.predicted_attack_cat;
+  $("selected-risk").textContent = row.risk_score;
+  $("selected-source").textContent =
+    percent(row.confidence) +
+    " model score · " +
+    (row.source === "benchmark_replay" ? row.event_id : "submitted flow") +
+    (row.review_recommended ? " · REVIEW QUEUE" : " · below review threshold");
+  $("selected-candidate").hidden = !row.is_anomaly_candidate;
+  $("classifier-points").textContent =
+    row.risk_components.classifier.toFixed(1) + " / 60";
+  $("anomaly-points").textContent =
+    row.risk_components.anomaly.toFixed(1) + " / 40";
+  $("classifier-bar").value = row.risk_components.classifier;
+  $("anomaly-bar").value = row.risk_components.anomaly;
+  $("action").textContent = row.recommended_action;
+  $("warnings").textContent = row.warnings.join(" · ");
+  const features = row.explanation?.features || [];
+  $("contributions").replaceChildren(buildContributionsFragment(features));
   $("raw-evidence").textContent = JSON.stringify(row, null, 2);
+
+  // Update Briefing View
+  $("briefing-empty").hidden = true;
+  $("briefing-content").hidden = false;
+  $("briefing-verdict-text").textContent = row.predicted_attack_cat;
+  $("briefing-flow-ref").textContent =
+    "#" + (row.event_id ? row.event_id.replace("replay-", "") : "custom") +
+    (row.protocol ? " · " + row.protocol.toUpperCase() : "");
+  $("briefing-risk-pill").textContent = row.risk_score + " / 100 · " + row.risk_level.toUpperCase() + " RISK";
+  $("briefing-risk-pill").className = "badge " + row.risk_level;
+  $("briefing-confidence-chip").textContent = "Confidence: " + percent(row.confidence);
+  $("briefing-queue-chip").textContent = row.review_recommended ? "Queue: Review required" : "Queue: Monitored";
+  $("briefing-queue-chip").className = "chip " + (row.review_recommended ? "chip-review" : "chip-normal");
+  $("briefing-candidate-chip").hidden = !row.is_anomaly_candidate;
+  $("briefing-action-text").textContent = row.recommended_action;
+
+  $("briefing-classifier-pts").textContent =
+    row.risk_components.classifier.toFixed(1) + " / 60";
+  $("briefing-anomaly-pts").textContent =
+    row.risk_components.anomaly.toFixed(1) + " / 40";
+  $("briefing-classifier-bar").value = row.risk_components.classifier;
+  $("briefing-anomaly-bar").value = row.risk_components.anomaly;
+  $("briefing-contributions").replaceChildren(buildContributionsFragment(features));
+
+  if (row._narrative) {
+    renderNarrative(row._narrative);
+  } else {
+    $("briefing-narrative-card").className = "narrative-card";
+    $("briefing-narrative-text").textContent =
+      'Click "Explain in plain English" to translate this detection into an executive summary.';
+    $("briefing-provider-badge").textContent = "Grounded";
+    $("briefing-narrate-status").textContent = "";
+    $("analyst-narrative-card").hidden = true;
+    $("analyst-narrate-status").textContent = "";
+  }
+
   renderRows();
 }
 function resetReplay() {
@@ -305,6 +454,10 @@ $("pause").onclick = () => {
     status("Replay paused");
   } else connect();
 };
+$("view-analyst-btn").onclick = () => switchView("analyst");
+$("view-briefing-btn").onclick = () => switchView("briefing");
+$("briefing-narrate-btn").onclick = requestNarrative;
+$("analyst-narrate-btn").onclick = requestNarrative;
 $("scenario").onchange = resetReplay;
 $("speed").onchange = () => {
   disconnect();
@@ -363,6 +516,7 @@ $("score").onclick = async () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
+    result._rawPayload = payload;
     inspect(result);
     $("input-status").textContent =
       result.predicted_attack_cat +

@@ -1,14 +1,22 @@
 :root {
   color-scheme: dark;
-  --bg: #0a111b;
-  --panel: #101b28;
-  --panel2: #142130;
-  --border: #223244;
-  --muted: #95a6bb;
-  --text: #edf3f9;
-  --accent: #6de0c2;
-  --orange: #ffb277;
-  --purple: #c2abff;
+  --bg: #0a0e14;
+  --panel: #101622;
+  --panel2: #141d2c;
+  --border: #1e2a3c;
+  --border-focus: #38bdf8;
+  --muted: #8596ac;
+  --text: #e6edf3;
+  --text-bright: #ffffff;
+  --accent: #3dd68c;
+  --green: #3dd68c;
+  --amber: #f5a623;
+  --orange: #f5a623;
+  --red: #e5484d;
+  --purple: #b79bfb;
+  --cyan: #38bdf8;
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
 }
 * {
   box-sizing: border-box;
@@ -21,10 +29,9 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font:
-    14px/1.5 "Segoe UI",
-    Arial,
-    sans-serif;
+  font: 14px/1.5 var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 a {
   color: inherit;
@@ -166,14 +173,51 @@ button:disabled {
   margin-left: 218px;
 }
 .topbar {
-  height: 73px;
+  height: 64px;
   border-bottom: 1px solid var(--border);
-  padding: 0 36px;
+  padding: 0 32px;
   display: flex;
   justify-content: space-between;
   align-items: center;
   font-size: 12px;
   color: var(--muted);
+  background: #0d141e;
+}
+.topbar-left {
+  display: flex;
+  align-items: center;
+}
+.topbar-center {
+  display: flex;
+  align-items: center;
+}
+.view-switcher {
+  display: flex;
+  background: #070b10;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 3px;
+  gap: 3px;
+}
+.view-btn {
+  background: transparent;
+  color: var(--muted);
+  border: none;
+  border-radius: 4px;
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  font-family: var(--font-sans);
+}
+.view-btn:hover {
+  color: var(--text-bright);
+}
+.view-btn.active {
+  background: #1c2738;
+  color: var(--text-bright);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
 }
 .topbar strong {
   color: #d4dfea;
@@ -556,30 +600,36 @@ select {
   margin-top: 3px;
 }
 .badge {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
   border-radius: 4px;
-  padding: 3px 7px;
-  font:
-    10px Consolas,
-    monospace;
-  background: #1f3440;
-  color: #cae2e9;
+  padding: 3px 8px;
+  font: 10px var(--font-mono);
+  letter-spacing: 0.4px;
+  background: #141c28;
+  color: #cad8e6;
+  border: 1px solid var(--border);
 }
 .badge.low {
-  color: var(--accent);
-  background: #183b31;
+  color: var(--green);
+  background: rgba(61, 214, 140, 0.12);
+  border-color: rgba(61, 214, 140, 0.28);
 }
 .badge.medium {
-  color: #edda85;
-  background: #393724;
+  color: var(--amber);
+  background: rgba(245, 166, 35, 0.12);
+  border-color: rgba(245, 166, 35, 0.28);
 }
 .badge.high {
-  color: var(--orange);
-  background: #3a2c24;
+  color: var(--red);
+  background: rgba(229, 72, 77, 0.14);
+  border-color: rgba(229, 72, 77, 0.32);
 }
 .badge.critical {
-  color: #ff9b9b;
-  background: #44272e;
+  color: #ff6b6e;
+  background: rgba(229, 72, 77, 0.24);
+  border-color: rgba(229, 72, 77, 0.5);
+  font-weight: 700;
 }
 .truth-match {
   color: #94b4a7;
@@ -1249,3 +1299,247 @@ footer a {
     animation: none !important;
   }
 }
+
+/* ==========================================================================
+   BRIEFING VIEW & SOC COMMAND CENTER ENHANCEMENTS
+   ========================================================================== */
+
+/* Monospace data enforcement */
+.metric-value,
+.flow-id,
+.flow-time,
+.flow-table td,
+.evaluation-table td,
+.confusion-table td,
+.chip,
+.risk-orb strong,
+.contribution-value,
+.rail-bottom,
+.rail-label,
+.eyebrow,
+.mode-tag,
+.small-tag,
+.provider-badge,
+.step-number,
+#clock,
+#model-id,
+#eval-accuracy,
+#eval-f1,
+#eval-recall,
+#eval-fpr,
+.score-breakdown strong,
+pre,
+code {
+  font-family: var(--font-mono);
+}
+
+/* Briefing Panel Container */
+.briefing-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 22px;
+}
+.briefing-view-tag {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 1px;
+  color: var(--cyan);
+  background: rgba(56, 189, 248, 0.1);
+  border: 1px solid rgba(56, 189, 248, 0.28);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-weight: 600;
+}
+.briefing-verdict-box {
+  background: #090e15;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.briefing-verdict-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.briefing-verdict-line {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.briefing-verdict-title {
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--text-bright);
+  margin: 0;
+  letter-spacing: -0.5px;
+}
+.briefing-chips {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.chip {
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: #141c28;
+  color: var(--muted);
+  border: 1px solid var(--border);
+}
+.chip.chip-review {
+  color: var(--amber);
+  border-color: rgba(245, 166, 35, 0.35);
+  background: rgba(245, 166, 35, 0.1);
+  font-weight: 600;
+}
+.chip.chip-normal {
+  color: var(--green);
+  border-color: rgba(61, 214, 140, 0.35);
+  background: rgba(61, 214, 140, 0.1);
+}
+
+/* On-Demand Plain English Trigger */
+.narrate-trigger-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 4px 0;
+  flex-wrap: wrap;
+}
+.narrate-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: #152538;
+  color: #7dd3fc;
+  border: 1px solid #2a4365;
+  border-radius: 6px;
+  padding: 9px 18px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  font-family: var(--font-sans);
+}
+.narrate-button:hover:not(:disabled) {
+  background: #1e334d;
+  color: #bae6fd;
+  border-color: #38bdf8;
+  box-shadow: 0 0 12px rgba(56, 189, 248, 0.2);
+}
+.narrate-button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+.narrate-sparkle {
+  color: #38bdf8;
+  font-size: 14px;
+}
+.narrate-status {
+  color: var(--muted);
+  font-size: 12px;
+  font-family: var(--font-mono);
+}
+.secondary-narrate {
+  margin: 12px 0 6px;
+  font-size: 12px;
+  padding: 7px 14px;
+}
+
+/* AI Narrative Card */
+.narrative-card {
+  background: #0c131e;
+  border: 1px solid #1f2f45;
+  border-radius: 6px;
+  padding: 16px 18px;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.narrative-card.narrative-unavailable {
+  border-color: #2b3a4e;
+  background: #0d141d;
+}
+.narrative-card.narrative-unavailable .narrative-prose {
+  color: var(--muted);
+  font-style: italic;
+}
+.narrative-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.provider-badge {
+  font-size: 10px;
+  color: #72849a;
+  background: #141c28;
+  padding: 2px 7px;
+  border-radius: 3px;
+  border: 1px solid #1e2a3c;
+  font-family: var(--font-mono);
+}
+.narrative-prose {
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--text);
+  margin: 0;
+  font-family: var(--font-sans);
+}
+
+/* Recommended Action Box */
+.briefing-action-box {
+  background: #0c1420;
+  border-left: 3px solid var(--accent);
+  border-radius: 0 6px 6px 0;
+  padding: 14px 18px;
+}
+.briefing-action-prose {
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: #d1dde8;
+  margin: 5px 0 0;
+  font-family: var(--font-sans);
+}
+
+/* Collapsible technical evidence */
+.briefing-tech-details {
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+  margin-top: 6px;
+}
+.briefing-tech-summary {
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+  font-weight: 500;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.briefing-tech-summary:hover {
+  color: var(--text-bright);
+}
+.briefing-tech-body {
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Active briefing mode overrides */
+body.mode-briefing-active #overview .subtitle {
+  color: var(--cyan);
+}
+
