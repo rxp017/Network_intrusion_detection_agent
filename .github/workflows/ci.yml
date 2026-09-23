@@ -17,6 +17,7 @@ jobs:
       - run: ruff check .
       - run: ruff format --check .
       - run: node --check static/dashboard.js
+      - run: node --check static/boot.js
       - run: mkdir -p .test-tmp
       - run: python -m pytest -m 'not browser' -q
       - run: python -m playwright install --with-deps chromium

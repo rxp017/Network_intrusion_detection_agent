@@ -317,12 +317,153 @@ def test_in_memory_cache(monkeypatch):
     assert mock_urlopen.call_count == 1
 
 
-def test_predict_narrate_endpoint_when_unavailable(client, flow):
+def test_predict_narrate_endpoint_when_not_configured(client, flow):
     response = client.post("/predict?narrate=true", json=flow)
     assert response.status_code == 200
     data = response.json()
     assert data["narrative"] is None
+    assert data["narrative_status"] == "not_configured"
+    assert "builtin_explanation" in data
+    assert data["builtin_explanation"]["is_builtin"] is True
+    assert "Built-in explanation" in data["builtin_explanation"]["provider"]
+
+
+def test_predict_narrate_endpoint_when_provider_fails(client, flow, monkeypatch):
+    monkeypatch.setenv("GROQ_API_KEY", "gsk-mock")
+    monkeypatch.setenv("LLM_PROVIDER", "groq")
+
+    with patch.object(httpx.AsyncClient, "post", side_effect=httpx.ConnectError("Network unreachable")):
+        response = client.post("/predict?narrate=true", json=flow)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["narrative"] is None
     assert data["narrative_status"] == "unavailable"
+    assert data["builtin_explanation"]["is_builtin"] is True
+
+
+def test_builtin_explanation_generation():
+    # Normal flow
+    normal_exp = llm_narrator.generate_builtin_explanation(
+        predicted_attack_cat="Normal",
+        confidence=0.98,
+        risk_score=12,
+        risk_tier="low",
+        review_recommended=False,
+        top_features=[{"name": "ct_dst_sport_ltm", "value": 1, "shap_contribution": -0.4}],
+    )
+    assert normal_exp["is_builtin"] is True
+    assert "Classified as Normal" in normal_exp["summary"]
+    assert "Built-in explanation (Rule-based)" in normal_exp["provider"]
+    assert "routine security monitoring" in normal_exp["recommended_action"]
+
+    # Attack flow with review recommended
+    attack_exp = llm_narrator.generate_builtin_explanation(
+        predicted_attack_cat="Exploits",
+        confidence=0.89,
+        risk_score=75,
+        risk_tier="high",
+        review_recommended=True,
+        top_features=[{"name": "sbytes", "value": 2400, "shap_contribution": 1.5}],
+    )
+    assert attack_exp["is_builtin"] is True
+    assert "Classified as Exploits attack" in attack_exp["summary"]
+    assert "Escalate Exploits detection" in attack_exp["recommended_action"]
+
+
+def test_browser_payload_construction_regression(client, flow):
+    """
+    REGRESSION TEST:
+    Simulates the exact browser payload construction from static/dashboard.js:
+    - When `service` is included along with `proto` and `state`, /predict succeeds (HTTP 200).
+    - When `service` was stripped by the buggy client logic, /predict rejects it (HTTP 422).
+    """
+    replay_row = {
+        **flow,
+        "event_id": "flow-42",
+        "row_index": 42,
+        "next_offset": 43,
+        "cycle": 1,
+        "timestamp": 1700000000.0,
+        "source": "replay",
+        "true_label": 1,
+        "protocol": flow.get("proto", "tcp"),
+        "predicted_attack_cat": "Generic",
+        "confidence": 0.88,
+        "risk_score": 65,
+        "risk_level": "high",
+        "review_recommended": True,
+        "explanation": {"raw_features": {**flow}, "features": []},
+        "_narrative": None,
+    }
+
+    def extract_model_features(row):
+        raw = row.get("explanation", {}).get("raw_features") or row.get("_rawPayload")
+        if raw and isinstance(raw, dict) and len(raw) >= 40:
+            clean = dict(raw)
+            clean.pop("id", None)
+            clean.pop("label", None)
+            clean.pop("attack_cat", None)
+            return clean
+        payload = dict(row)
+        metadata_keys = [
+            "id",
+            "label",
+            "attack_cat",
+            "event_id",
+            "row_index",
+            "next_offset",
+            "cycle",
+            "timestamp",
+            "source",
+            "true_label",
+            "protocol",
+            "_narrative",
+            "_rawPayload",
+            "model_id",
+            "predicted_attack_cat",
+            "confidence",
+            "class_probabilities",
+            "attack_probability",
+            "anomaly_score",
+            "anomaly_percentile",
+            "risk_score",
+            "risk_level",
+            "risk_components",
+            "is_anomaly_candidate",
+            "review_recommended",
+            "review_threshold",
+            "warnings",
+            "recommended_action",
+            "explanation",
+            "inference_ms",
+            "narrative",
+            "narrative_status",
+            "builtin_explanation",
+        ]
+        for k in metadata_keys:
+            payload.pop(k, None)
+        return payload
+
+    # 1. Repaired payload retains service
+    repaired_payload = extract_model_features(replay_row)
+    assert "service" in repaired_payload
+    assert "proto" in repaired_payload
+    assert "state" in repaired_payload
+    assert "event_id" not in repaired_payload
+    assert "true_label" not in repaired_payload
+
+    resp_ok = client.post("/predict?narrate=true", json=repaired_payload)
+    assert resp_ok.status_code == 200, (
+        f"Expected 200 with repaired payload, got {resp_ok.status_code}: {resp_ok.text}"
+    )
+
+    # 2. Buggy payload stripped service -> 422 Unprocessable Entity
+    buggy_payload = dict(repaired_payload)
+    del buggy_payload["service"]
+    resp_bug = client.post("/predict?narrate=true", json=buggy_payload)
+    assert resp_bug.status_code == 422
+    assert "Missing: ['service']" in resp_bug.json()["detail"]
 
 
 def test_predict_narrate_endpoint_when_available(client, flow, monkeypatch):
@@ -355,6 +496,58 @@ def test_predict_narrate_endpoint_when_available(client, flow, monkeypatch):
     assert data["narrative_status"] == "ok"
     assert data["narrative"]["summary"] == "Endpoint async narrative verified."
     assert data["narrative"]["recommended_action"] == "Inspect endpoint logs."
+
+
+def test_gemini_credentials_passed_in_header_not_url(monkeypatch):
+    """Verify Gemini API keys are sent via x-goog-api-key header and NOT query params."""
+    monkeypatch.setenv("GEMINI_API_KEY", "secret-gemini-key-12345")
+    monkeypatch.setenv("LLM_PROVIDER", "gemini")
+
+    captured_url = None
+    captured_headers = None
+
+    async def mock_post(url, *args, **kwargs):
+        nonlocal captured_url, captured_headers
+        captured_url = str(url)
+        captured_headers = kwargs.get("headers", {})
+        return httpx.Response(
+            200,
+            json={
+                "candidates": [
+                    {
+                        "content": {
+                            "parts": [
+                                {
+                                    "text": json.dumps(
+                                        {
+                                            "summary": "Header auth verified.",
+                                            "recommended_action": "Verify credentials header.",
+                                        }
+                                    )
+                                }
+                            ]
+                        }
+                    }
+                ]
+            },
+        )
+
+    with patch.object(httpx.AsyncClient, "post", side_effect=mock_post):
+        asyncio.run(
+            llm_narrator.agenerate_narrative(
+                predicted_attack_cat="Normal",
+                confidence=0.99,
+                risk_score=1,
+                risk_tier="low",
+                review_recommended=False,
+                top_features=[],
+            )
+        )
+
+    assert captured_url is not None
+    assert "secret-gemini-key-12345" not in captured_url
+    assert "?key=" not in captured_url
+    assert captured_headers.get("x-goog-api-key") == "secret-gemini-key-12345"
 
 
 def test_predict_batch_ignores_narrate(client, flow):

@@ -45,7 +45,7 @@ DEFAULT_MODELS = {
     "gemini": "gemini-2.5-flash",
 }
 
-FALLBACK_SUMMARY = "AI narrative unavailable — no API key configured or upstream quota reached."
+FALLBACK_SUMMARY = "AI narrative unavailable."
 FALLBACK_ACTION = "Follow standard security review protocol."
 
 # In-memory cache: hash(features + predicted class + risk_score) -> dict
@@ -279,6 +279,85 @@ def _parse_llm_json(raw_text: str) -> tuple[str, str]:
     return summary, action
 
 
+def generate_builtin_explanation(
+    predicted_attack_cat: str,
+    confidence: float,
+    risk_score: int,
+    risk_tier: str,
+    review_recommended: bool,
+    top_features: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Generate a deterministic, grounded non-AI explanation from model evidence."""
+    feat_phrases = []
+    for f in top_features[:3]:
+        name = f.get("name") or f.get("feature", "feature")
+        val = f.get("value")
+        if val is None:
+            val = f.get("encoded_value", "N/A")
+        contrib = f.get("shap_contribution")
+        if contrib is None:
+            contrib = f.get("contribution", 0.0)
+        direction = "increasing" if contrib >= 0 else "reducing"
+        if isinstance(val, float):
+            val_str = f"{val:.2f}"
+        else:
+            val_str = str(val)
+        feat_phrases.append(f"{name} ({val_str}, {direction} attack score by {abs(contrib):.2f})")
+
+    features_text = ", ".join(feat_phrases) if feat_phrases else "standard session feature distributions"
+
+    if predicted_attack_cat == "Normal":
+        summary = (
+            f"Classified as Normal with {confidence:.1%} confidence and {risk_tier} risk ({risk_score}/100). "
+            f"Primary factors driving the baseline margin include {features_text}. "
+            f"{'Flagged for review due to anomalous baseline patterns.' if review_recommended else 'Traffic characteristics remain within expected baseline bounds.'}"
+        )
+        action = (
+            "Review flow against host and DNS logs for subtle anomalies."
+            if review_recommended
+            else "Continue routine security monitoring; this prediction does not certify the flow as safe."
+        )
+    else:
+        summary = (
+            f"Classified as {predicted_attack_cat} attack with {confidence:.1%} confidence and {risk_tier} risk ({risk_score}/100). "
+            f"Key contributing factors driving the attack margin include {features_text}. "
+            f"{'Review is recommended under the operational threshold policy.' if review_recommended else 'Attack score is below the operational escalation threshold.'}"
+        )
+        action = (
+            f"Escalate {predicted_attack_cat} detection to security operations for corroboration and investigation."
+            if review_recommended
+            else "Log detection for trend correlation; immediate escalation optional."
+        )
+
+    return {
+        "summary": summary,
+        "recommended_action": action,
+        "provider": "Built-in explanation (Rule-based)",
+        "is_builtin": True,
+    }
+
+
+def get_builtin_explanation(scored_result: dict[str, Any]) -> dict[str, Any]:
+    """Extract evidence fields from scored result and return a built-in explanation."""
+    explanation = scored_result.get("explanation") or {}
+    top_features = [
+        {
+            "name": f.get("feature", "unknown"),
+            "value": f.get("encoded_value", 0.0),
+            "shap_contribution": f.get("contribution", 0.0),
+        }
+        for f in explanation.get("features", [])
+    ]
+    return generate_builtin_explanation(
+        predicted_attack_cat=scored_result["predicted_attack_cat"],
+        confidence=scored_result["confidence"],
+        risk_score=scored_result["risk_score"],
+        risk_tier=scored_result.get("risk_level", "medium"),
+        review_recommended=scored_result.get("review_recommended", False),
+        top_features=top_features,
+    )
+
+
 async def _request_groq_async(
     client: httpx.AsyncClient,
     user_prompt: str,
@@ -302,9 +381,9 @@ async def _request_groq_async(
     }
     resp = await client.post(url, json=body, headers=headers)
     if resp.status_code == 429:
-        raise ProviderQuotaExceeded(f"Groq rate limit exceeded (HTTP 429): {resp.text}")
+        raise ProviderQuotaExceeded("Groq rate limit exceeded (HTTP 429)")
     if resp.status_code >= 400:
-        raise ProviderError(f"Groq API returned HTTP {resp.status_code}: {resp.text}")
+        raise ProviderError(f"Groq API returned HTTP {resp.status_code}")
 
     res_data = resp.json()
     content = res_data["choices"][0]["message"]["content"]
@@ -317,8 +396,10 @@ async def _request_gemini_async(
     api_key: str,
     model: str,
 ) -> tuple[str, str]:
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+    # Key is passed in header to avoid exposure in URLs or HTTP logs
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
     headers = {
+        "x-goog-api-key": api_key,
         "Content-Type": "application/json",
         "User-Agent": "NIDA-SOC/2.0",
     }
@@ -332,9 +413,9 @@ async def _request_gemini_async(
     }
     resp = await client.post(url, json=body, headers=headers)
     if resp.status_code == 429:
-        raise ProviderQuotaExceeded(f"Gemini quota/rate limit exceeded (HTTP 429): {resp.text}")
+        raise ProviderQuotaExceeded("Gemini quota/rate limit exceeded (HTTP 429)")
     if resp.status_code >= 400:
-        raise ProviderError(f"Gemini API returned HTTP {resp.status_code}: {resp.text}")
+        raise ProviderError(f"Gemini API returned HTTP {resp.status_code}")
 
     res_data = resp.json()
     candidates = res_data.get("candidates", [])
@@ -385,8 +466,10 @@ def _request_gemini_sync(
     timeout: float = 6.0,
 ) -> tuple[str, str]:
     """Synchronous Gemini request implementation using urllib.request."""
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+    # Key is passed in header to avoid exposure in URLs or HTTP logs
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
     headers = {
+        "x-goog-api-key": api_key,
         "Content-Type": "application/json",
         "User-Agent": "NIDA-SOC/2.0",
     }
@@ -467,19 +550,21 @@ async def agenerate_narrative(
                     "provider": provider_label,
                 }
             except Exception as exc:
+                # Log safe error without exposing credentials or URLs
+                status_desc = type(exc).__name__
                 if idx + 1 < len(providers):
                     next_provider = providers[idx + 1][0]
                     logger.warning(
                         "LLM provider '%s' failed (%s). Failing over to '%s' (waterfall)...",
                         provider,
-                        exc,
+                        status_desc,
                         next_provider,
                     )
                 else:
                     logger.warning(
                         "LLM provider '%s' failed (%s). No remaining fallback provider.",
                         provider,
-                        exc,
+                        status_desc,
                     )
 
     return {
@@ -537,19 +622,20 @@ def generate_narrative(
                 "provider": provider_label,
             }
         except Exception as exc:
+            status_desc = type(exc).__name__
             if idx + 1 < len(providers):
                 next_provider = providers[idx + 1][0]
                 logger.warning(
                     "Sync LLM provider '%s' failed (%s). Failing over to '%s' (waterfall)...",
                     provider,
-                    exc,
+                    status_desc,
                     next_provider,
                 )
             else:
                 logger.warning(
                     "Sync LLM provider '%s' failed (%s). No remaining fallback provider.",
                     provider,
-                    exc,
+                    status_desc,
                 )
 
     return {

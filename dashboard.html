@@ -3,133 +3,296 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <meta name="theme-color" content="#0a111b" />
+    <meta name="theme-color" content="#f3f0e8" />
     <meta
       name="description"
       content="NIDA: explainable network flow triage with a reproducible UNSW-NB15 benchmark."
     />
-    <title>NIDA — Threat intelligence workspace</title>
+    <title>NIDA — Explainable Network Flow Triage</title>
+    <script src="/static/boot.js"></script>
     <link rel="icon" href="/static/mark.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="/static/dashboard.css" />
     <script src="/static/dashboard.js" defer></script>
   </head>
   <body>
-    <a class="skip" href="#main">Skip to workspace</a>
-    <aside class="rail">
-      <a href="/" class="brand" aria-label="NIDA home"
-        ><img src="/static/mark.svg" alt="" width="34" height="34" /><span
-          >NIDA<span class="brand-dot">.</span></span
-        ></a
-      >
-      <div class="rail-label">WORKSPACE</div>
-      <nav aria-label="Main navigation">
-        <a href="#overview" class="nav-item active"
-          ><span aria-hidden="true">◈</span> Overview</a
-        >
-        <a href="#investigate" class="nav-item"
-          ><span aria-hidden="true">⌕</span> Investigate flow</a
-        >
-        <a href="#evidence" class="nav-item"
-          ><span aria-hidden="true">▥</span> Model evidence</a
-        >
-        <a href="/docs" target="_blank" rel="noopener" class="nav-item"
-          ><span aria-hidden="true">↗</span> API reference</a
-        >
+    <div id="loading-screen" class="loading-screen" role="status" aria-live="polite" aria-label="Loading NIDA">
+      <div class="loading-mark" aria-hidden="true">N<span>.</span></div>
+      <div class="loading-copy">
+        <span class="eyebrow">NIDA / BENCHMARK REPLAY</span>
+        <strong>Preparing your investigation</strong>
+        <p>Loading the model, evidence, and first connection.</p>
+      </div>
+      <div class="loading-line" aria-hidden="true"><span></span></div>
+    </div>
+    <a class="skip" href="#main">Skip to main content</a>
+
+    <!-- App Shell Header -->
+    <header class="topbar" role="banner">
+      <div class="topbar-brand">
+        <a href="/" class="brand" aria-label="NIDA Home">
+          <img src="/static/mark.svg" alt="" width="28" height="28" />
+          <span class="brand-text">NIDA<span class="brand-dot">.</span></span>
+        </a>
+        <span class="brand-tagline">Signal · Evidence · Action</span>
+      </div>
+
+      <!-- Mode Switcher: Understand (Default) vs Technical -->
+      <nav class="mode-nav" aria-label="Audience presentation mode">
+        <div class="mode-tabs" role="tablist">
+          <button
+            id="mode-understand-btn"
+            class="mode-tab active"
+            role="tab"
+            aria-selected="true"
+            aria-controls="view-understand"
+            type="button"
+          >
+            <span class="mode-icon" aria-hidden="true">✦</span> Understand
+          </button>
+          <button
+            id="mode-technical-btn"
+            class="mode-tab"
+            role="tab"
+            aria-selected="false"
+            aria-controls="view-technical"
+            type="button"
+          >
+            <span class="mode-icon" aria-hidden="true">⚙</span> Technical
+          </button>
+        </div>
       </nav>
-      <div class="rail-note">
-        <span class="eyebrow">DUAL ENGINE</span
-        ><strong>XGBoost<br />+ Isolation Forest</strong>
+
+      <div class="topbar-meta">
+        <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Switch to dark mode" aria-pressed="false">
+          <span id="theme-icon" aria-hidden="true">☾</span><span id="theme-label">Dark</span>
+        </button>
+        <span class="mode-badge" title="Replaying held-out benchmark flows">BENCHMARK REPLAY</span>
+        <div class="connection-status" aria-live="polite">
+          <span id="connection-dot" class="status-dot muted" aria-hidden="true"></span>
+          <span id="connection" role="status">Connecting</span>
+        </div>
+        <time id="clock" class="topbar-clock" aria-label="UTC Time"></time>
+      </div>
+    </header>
+
+    <!-- Persistent Disclaimer Banner -->
+    <aside class="benchmark-disclaimer" role="note" aria-label="Data provenance notice">
+      <div class="disclaimer-content">
+        <span class="disclaimer-icon" aria-hidden="true">ℹ</span>
         <p>
-          Classify known patterns.<br />Surface unusual behavior.<br />Keep the
-          analyst in control.
+          <strong>Benchmark replay:</strong> 400 held-out UNSW-NB15 connection records. This is a research demo;
+          it does not watch your network or block traffic.
         </p>
       </div>
-      <div class="rail-bottom">
-        <span class="status-dot"></span> LOCAL RESEARCH BUILD
-        <span id="model-id">…</span>
+      <div class="disclaimer-links">
+        <span class="model-tag">Model: <code id="model-id">loading…</code></span>
+        <a href="#evidence" class="text-link">Audit evaluation ↗</a>
       </div>
     </aside>
-    <div class="shell">
-      <header class="topbar">
-        <div class="topbar-left">
-          Security operations <span class="slash">/</span>
-          <strong id="workspace-mode-label">Detection workspace</strong>
-        </div>
-        <div class="topbar-center">
-          <div class="view-switcher" role="tablist" aria-label="Dashboard presentation view">
-            <button id="view-analyst-btn" class="view-btn active" role="tab" aria-selected="true" type="button">
-              Analyst View
-            </button>
-            <button id="view-briefing-btn" class="view-btn" role="tab" aria-selected="false" type="button">
-              Briefing View
-            </button>
+
+    <div id="error" class="error-banner" role="alert" hidden></div>
+
+    <main id="main">
+      <!-- ================================================================= -->
+      <!-- MODE 1: UNDERSTAND (Default Presentation)                         -->
+      <!-- ================================================================= -->
+      <section id="view-understand" class="presentation-view" role="tabpanel" aria-labelledby="mode-understand-btn">
+        <section class="understand-hero" aria-labelledby="understand-hero-title">
+          <div class="hero-main">
+            <span class="eyebrow">NIDA / NETWORK INTRUSION DETECTION AGENT</span>
+            <h1 id="understand-hero-title">Which connections deserve a closer look?</h1>
+            <p class="hero-desc">NIDA checks recorded network connections for attack patterns and unusual behavior, then shows which ones a person should review.</p>
+            <div class="hero-actions">
+              <a class="button primary" href="#guided-title">See a connection <span aria-hidden="true">↘</span></a>
+              <button id="hero-technical-btn" class="button secondary" type="button">See the technical evidence <span aria-hidden="true">→</span></button>
+            </div>
+            <p class="hero-footnote">A research demo using 400 benchmark records. No live network access or automatic blocking.</p>
           </div>
-        </div>
-        <div class="topbar-right">
-          <span class="mode-tag">BENCHMARK REPLAY</span><time id="clock"></time>
-        </div>
-      </header>
-      <main id="main">
-        <section id="overview" class="heading-row">
-          <div>
-            <div class="eyebrow">NETWORK INTRUSION DETECTION AGENT</div>
-            <h1>Signal. Evidence. Action.</h1>
-            <p class="subtitle">
-              Explainable flow triage, from model verdict to analyst decision.
-            </p>
-          </div>
-          <div class="connection">
-            <span id="connection-dot" class="status-dot muted"></span
-            ><span id="connection" role="status" aria-live="polite"
-              >Connecting</span
-            >
+          <div class="hero-process" aria-label="How NIDA works">
+            <div class="process-heading"><span>THE IDEA, IN THREE MOVES</span><span>01 — 03</span></div>
+            <div class="process-row"><b>01</b><span>Read a connection record</span><small>Protocol, bytes, duration, and other measured features</small></div>
+            <div class="process-row"><b>02</b><span>Score the pattern</span><small>Attack classifier + anomaly detector</small></div>
+            <div class="process-row"><b>03</b><span>Hand off the evidence</span><small>A human decides what happens next</small></div>
+            <div class="process-end">RECORD <span>→</span> MODEL <span>→</span> HUMAN REVIEW</div>
           </div>
         </section>
-        <div class="notice">
-          <span class="notice-icon" aria-hidden="true">i</span>
-          <p>
-            <strong>Know your source.</strong> Replaying 400 held-out benchmark
-            flows, balanced across 10 classes. This is not a live network feed.
-            Anomalies require investigation.
-          </p>
-          <a href="#evidence">View evidence ↗</a>
+
+        <section class="guided-section" aria-labelledby="guided-title">
+          <div class="section-title-row">
+            <div>
+              <span class="eyebrow">ONE CONNECTION, EXPLAINED</span>
+              <h2 id="guided-title">What happened in this record?</h2>
+              <p class="section-subtitle">Choose an example or select a row in the replay below.</p>
+            </div>
+            <div class="archetype-picker" role="group" aria-label="Choose a benchmark example">
+              <button id="archetype-normal" class="button archetype-btn active" type="button">Normal</button>
+              <button id="archetype-generic" class="button archetype-btn" type="button">Generic attack</button>
+              <button id="archetype-recon" class="button archetype-btn" type="button">Reconnaissance</button>
+            </div>
+          </div>
+
+          <div class="guided-grid">
+            <article class="guided-card">
+              <div class="guided-card-header">
+                <div><span class="eyebrow">SELECTED RECORD</span><h3 id="guided-flow-id">Waiting for a connection…</h3></div>
+                <div class="guided-tags"><span id="guided-verdict-badge" class="badge">Waiting</span><span id="guided-risk-badge" class="badge">Risk —</span></div>
+              </div>
+              <div class="result-summary">
+                <span class="result-kicker">NIDA'S TAKE</span>
+                <p id="guided-step-decision">The first connection is on its way.</p>
+              </div>
+              <div class="result-details">
+                <div><span class="field-label">WHAT THE RECORD SHOWS</span><p id="guided-step-observation">Waiting for benchmark data.</p></div>
+                <div><span class="field-label">WHY IT WAS FLAGGED</span><p id="guided-step-significance">The review decision will appear here.</p></div>
+              </div>
+              <div id="guided-candidate-note" class="candidate-plain-note" hidden>
+                The classifier said Normal, but the anomaly detector found this record unusual. A person should check it.
+              </div>
+              <div class="result-action"><span class="field-label">NEXT STEP FOR A PERSON</span><p id="guided-step-action">Waiting for the first result.</p></div>
+              <p class="uncertainty-callout">A model prediction and risk score are signals, not proof of an attack. Open Technical for the score breakdown and benchmark results.</p>
+            </article>
+
+            <aside class="guided-sidebar">
+              <article class="narrative-briefing-card">
+                <div class="narrative-card-top"><div><span class="eyebrow">OPTIONAL CONTEXT</span><h3>Explain this result</h3></div></div>
+                <p class="sidebar-intro">Ask for a short explanation. If an AI provider is unavailable, NIDA uses its built-in explanation.</p>
+                <div class="narrate-trigger-row">
+                  <button id="briefing-narrate-btn" class="button narrate-button" type="button">Generate explanation</button>
+                  <span id="briefing-narrate-status" class="micro narrate-status" role="status" aria-live="polite"></span>
+                </div>
+                <div id="briefing-narrative-card" class="narrative-card narrative-builtin" hidden>
+                  <span id="briefing-provider-badge" class="provider-badge">Built-in explanation</span>
+                  <p id="briefing-narrative-text" class="narrative-prose"></p>
+                </div>
+                <div class="briefing-action-box"><span class="field-label">SUGGESTED ACTION</span><p id="briefing-action-text" class="briefing-action-prose">—</p></div>
+              </article>
+              <details class="glossary-card">
+                <summary>What do these terms mean?</summary>
+                <dl class="glossary-list">
+                  <dt>Connection record</dt><dd>A summary of one network conversation, including its measured features.</dd>
+                  <dt>Review recommended</dt><dd>The review policy queued a record for a person. It did not block traffic.</dd>
+                  <dt>Anomaly candidate</dt><dd>A record classified as Normal but unusually different from the normal benchmark examples.</dd>
+                  <dt>Model score</dt><dd>How strongly the model favored a class. It is not a guarantee that the class is correct.</dd>
+                </dl>
+              </details>
+            </aside>
+          </div>
+        </section>
+
+        <section class="explorer-section" aria-labelledby="explorer-heading">
+          <div class="section-title-row">
+            <div><span class="eyebrow">BENCHMARK REPLAY</span><h2 id="explorer-heading">Browse the records</h2><p class="section-subtitle">Choose a row to see its result above.</p></div>
+            <span id="understand-visible-count" class="feed-stats-badge">0 flows visible</span>
+          </div>
+        </section>
+      </section>
+
+      <!-- ================================================================= -->
+      <!-- SHARED STREAM CONTROLS & DETECTION FEED CONTAINER                 -->
+      <!-- ================================================================= -->
+      <section class="panel feed-panel" aria-label="Replay stream and detection feed">
+        <div class="feed-toolbar">
+          <div class="toolbar-group">
+            <button id="pause" class="button primary" type="button">Pause replay</button>
+            <label class="control-label">
+              <span>Scenario</span>
+              <select id="scenario">
+                <option value="all">All classes</option>
+              </select>
+            </label>
+            <label class="control-label">
+              <span>Rate</span>
+              <select id="speed">
+                <option value="1.5">Slow</option>
+                <option value="0.6" selected>Normal</option>
+                <option value="0.15">Fast</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="toolbar-group search-group">
+            <label class="search-label">
+              <span class="search-icon" aria-hidden="true">⌕</span>
+              <input
+                id="search"
+                type="search"
+                placeholder="Filter predicted class or protocol…"
+                aria-label="Filter displayed flows"
+              />
+            </label>
+            <label class="control-label">
+              <span class="sr-only">Risk filter</span>
+              <select id="risk-filter" aria-label="Filter by minimum risk">
+                <option value="0">All risk levels</option>
+                <option value="review">Review queue only</option>
+                <option value="50">High + Critical</option>
+                <option value="75">Critical only</option>
+              </select>
+            </label>
+            <button id="export" class="button secondary" type="button">Export session ↓</button>
+          </div>
         </div>
-        <div id="error" class="error" role="alert" hidden></div>
-        <section class="metrics-grid" aria-label="Session metrics">
-          <article class="metric">
+
+        <div class="table-scroll">
+          <table class="flow-table" aria-label="Replayed network flows">
+            <thead>
+              <tr>
+                <th scope="col">Flow / Time</th>
+                <th scope="col">Verdict</th>
+                <th scope="col">Protocol</th>
+                <th scope="col">Service</th>
+                <th scope="col" class="tech-col">Decision</th>
+                <th scope="col">Risk</th>
+                <th scope="col">Ground truth</th>
+              </tr>
+            </thead>
+            <tbody id="flows"></tbody>
+          </table>
+          <div id="empty" class="empty-state">Waiting for replay data…</div>
+        </div>
+
+        <div class="panel-footer">
+          <span id="visible-count">0 visible flows</span>
+          <span>Latest 80 retained · Click or press Enter to inspect</span>
+        </div>
+      </section>
+
+      <!-- ================================================================= -->
+      <!-- MODE 2: TECHNICAL (Analyst / Reviewer / Judge Presentation)        -->
+      <!-- ================================================================= -->
+      <section id="view-technical" class="presentation-view" role="tabpanel" aria-labelledby="mode-technical-btn" hidden>
+        <!-- Telemetry & Metric Highlights -->
+        <section class="metrics-grid" aria-label="Session telemetry">
+          <article class="metric-card">
             <div class="metric-label">Flows inspected <span>↗</span></div>
             <div id="total" class="metric-value">0</div>
-            <div class="metric-foot">
-              <span class="status-dot"></span> This browser session · includes
-              replay cycles
-            </div>
+            <div class="metric-foot">Browser session · includes cycles</div>
           </article>
-          <article class="metric">
-            <div class="metric-label">
-              Review queue <span class="orange">◇</span>
-            </div>
+          <article class="metric-card">
+            <div class="metric-label">Review queue <span class="amber-text">◇</span></div>
             <div id="attacks" class="metric-value">0</div>
             <div id="attack-rate" class="metric-foot">Awaiting first flow</div>
           </article>
-          <article class="metric">
-            <div class="metric-label">
-              Anomaly candidates <span class="purple">◈</span>
-            </div>
+          <article class="metric-card">
+            <div class="metric-label">Anomaly candidates <span class="purple-text">◈</span></div>
             <div id="anomalies" class="metric-value">0</div>
             <div class="metric-foot">Normal verdict + extreme outlier</div>
           </article>
-          <article class="metric">
-            <div class="metric-label">Last inference <span>ϟ</span></div>
+          <article class="metric-card">
+            <div class="metric-label">Last inference <span>⚡</span></div>
             <div class="metric-value">
-              <span id="latency">—</span><small>ms</small>
+              <span id="latency">—</span><small class="unit">ms</small>
             </div>
-            <div class="metric-foot">Both models + per-flow TreeSHAP</div>
+            <div class="metric-foot">Dual engine + TreeSHAP</div>
           </article>
         </section>
+
+        <!-- Risk Pulse Chart -->
         <section class="panel activity-panel" aria-label="Risk history">
           <div class="activity-caption">
-            <span class="eyebrow">RISK PULSE</span><strong>Last 60 flows</strong
-            ><span>Heuristic score · 0–100</span>
+            <span class="eyebrow">RISK PULSE</span>
+            <strong>Last 60 flows</strong>
+            <span class="micro">Heuristic score · 0–100</span>
           </div>
           <svg
             id="pulse"
@@ -144,359 +307,265 @@
           </svg>
           <div class="pulse-scale"><span>100</span><span>0</span></div>
         </section>
-        <div class="workspace-grid">
-          <section class="panel flow-panel" aria-labelledby="flows-heading">
-            <div class="panel-heading">
-              <div>
-                <h2 id="flows-heading">
-                  Detection feed <span class="small-tag">REPLAY</span>
-                </h2>
-                <p>Inspect a flow to see the evidence behind its verdict.</p>
+
+        <!-- Technical Inspector Dossier -->
+        <section class="panel inspector-dossier" aria-labelledby="technical-inspector-heading">
+          <div class="panel-heading">
+            <div>
+              <span class="eyebrow">TECHNICAL EVIDENCE DOSSIER</span>
+              <h2 id="technical-inspector-heading">Follow the Evidence</h2>
+              <p>Comprehensive per-flow evidence: verdict, TreeSHAP margin attribution, and risk decomposition.</p>
+            </div>
+            <span class="tech-icon" aria-hidden="true">⌕</span>
+          </div>
+
+          <div id="inspection-empty" class="empty-state">
+            Select a detection row above or score a custom feature row below.
+          </div>
+
+          <div id="inspection" hidden>
+            <!-- Verdict & Ground Truth Comparison -->
+            <div class="verdict-bar">
+              <div class="verdict-primary">
+                <span class="field-label">CLASSIFIER VERDICT</span>
+                <h3 id="selected-verdict"></h3>
+                <div class="source-ground-truth-row">
+                  <span id="selected-source" class="micro"></span>
+                  <span id="selected-truth-comparison" class="truth-comparison"></span>
+                </div>
               </div>
-              <button id="export" class="button secondary">
-                Export session ↓
-              </button>
-            </div>
-            <div class="toolbar">
-              <label
-                >Scenario
-                <select id="scenario">
-                  <option value="all">All classes</option>
-                </select></label
-              >
-              <label
-                >Rate
-                <select id="speed">
-                  <option value="1.5">Slow</option>
-                  <option value="0.6" selected>Normal</option>
-                  <option value="0.15">Fast</option>
-                </select></label
-              >
-              <button id="pause" class="button primary">Pause replay</button>
-            </div>
-            <div class="filterbar">
-              <label class="search-label"
-                ><span aria-hidden="true">⌕</span
-                ><input
-                  id="search"
-                  placeholder="Filter predicted class or protocol…"
-                  aria-label="Filter displayed flows" /></label
-              ><label
-                ><span class="sr-only">Minimum risk</span
-                ><select id="risk-filter">
-                  <option value="0">All risk levels</option>
-                  <option value="review">Review queue only</option>
-                  <option value="50">High + critical</option>
-                  <option value="75">Critical only</option>
-                </select></label
-              >
-            </div>
-            <div class="table-scroll">
-              <table class="flow-table">
-                <thead>
-                  <tr>
-                    <th scope="col">Flow / time</th>
-                    <th scope="col">Verdict</th>
-                    <th scope="col">Protocol</th>
-                    <th scope="col">Risk</th>
-                    <th scope="col">Ground truth</th>
-                  </tr>
-                </thead>
-                <tbody id="flows"></tbody>
-              </table>
-              <div id="empty" class="empty">Waiting for replay data…</div>
-            </div>
-            <div class="panel-footer">
-              <span id="visible-count">0 visible flows</span
-              ><span>Latest 80 retained · Enter to inspect</span>
-            </div>
-          </section>
-          <aside class="right-stack">
-            <section
-              class="panel inspector"
-              aria-labelledby="inspector-heading"
-            >
-              <div class="panel-heading">
-                <div>
-                  <div class="eyebrow">FLOW INVESTIGATION</div>
-                  <h2 id="inspector-heading">Follow the evidence</h2>
+              <div class="risk-score-box">
+                <div class="risk-score-circle">
+                  <strong id="selected-risk">0</strong>
+                  <span>/ 100</span>
                 </div>
-                <span class="inspector-icon">⌕</span>
+                <span class="field-label">HEURISTIC RISK</span>
               </div>
-              <div id="inspection-empty" class="empty">
-                Select a detection, or score your own feature row below.
+            </div>
+
+            <div id="selected-candidate" class="candidate-banner" hidden>
+              ⚠ <strong>Anomaly candidate:</strong> Isolation Forest score below validation-normal 1st percentile. Investigate baseline shift; not proof of an exploit.
+            </div>
+
+            <!-- Risk Components Decomposition -->
+            <div class="score-breakdown-box">
+              <span class="field-label">RISK DECOMPOSITION</span>
+              <div class="breakdown-row">
+                <span>Classifier points (60 × (1 - P(Normal)))</span>
+                <strong id="classifier-points">0</strong>
               </div>
-              <div id="inspection" hidden>
-                <div class="verdict-row">
-                  <div>
-                    <span class="field-label">MODEL VERDICT</span>
-                    <h3 id="selected-verdict"></h3>
-                    <span id="selected-source" class="micro"></span>
-                  </div>
-                  <div class="risk-orb">
-                    <strong id="selected-risk"></strong><span>/ 100 risk</span>
-                  </div>
-                </div>
-                <div id="selected-candidate" class="candidate" hidden>
-                  Anomaly candidate · investigate; no zero-day claim
-                </div>
-                <div class="score-breakdown">
-                  <div>
-                    <span>Classifier contribution</span
-                    ><strong id="classifier-points"></strong>
-                  </div>
-                  <progress id="classifier-bar" max="60" value="0"></progress>
-                  <div>
-                    <span>Anomaly contribution</span
-                    ><strong id="anomaly-points"></strong>
-                  </div>
-                  <progress id="anomaly-bar" max="40" value="0"></progress>
-                </div>
-                <div class="explain-title">
-                  <h3>What moved this verdict?</h3>
-                  <span class="small-tag">TreeSHAP</span>
-                </div>
-                <p class="micro">
-                  Top signed contributions to this class's raw margin. Positive
-                  supports the verdict; negative opposes it.
+              <progress id="classifier-bar" max="60" value="0" aria-label="Classifier points"></progress>
+
+              <div class="breakdown-row">
+                <span>Anomaly points (40 × anomaly percentile)</span>
+                <strong id="anomaly-points">0</strong>
+              </div>
+              <progress id="anomaly-bar" max="40" value="0" aria-label="Anomaly points"></progress>
+            </div>
+
+            <!-- Isolation Forest & Review Policy Context -->
+            <div class="policy-context-box">
+              <div class="context-item">
+                <span class="field-label">ANOMALY ENGINE CONTEXT</span>
+                <p id="tech-anomaly-context" class="micro">
+                  Raw score: <strong id="tech-raw-anomaly">—</strong> · Percentile: <strong id="tech-anomaly-pct">—</strong> (Cutoff threshold: -0.0836)
                 </p>
-                <div id="contributions"></div>
-                <div class="next-step">
-                  <span class="eyebrow">SUGGESTED ANALYST ACTION</span>
-                  <p id="action"></p>
-                </div>
-                <div class="narrate-trigger-row analyst-narrate">
-                  <button id="analyst-narrate-btn" class="button narrate-button secondary-narrate" type="button">
-                    <span class="narrate-sparkle">✦</span> Explain in plain English
-                  </button>
-                  <span id="analyst-narrate-status" class="micro narrate-status" role="status" aria-live="polite"></span>
-                </div>
-                <div id="analyst-narrative-card" class="narrative-card" hidden>
-                  <div class="narrative-header">
-                    <span class="eyebrow">AI NARRATIVE CAPTION</span>
-                    <span id="analyst-provider-badge" class="provider-badge"></span>
-                  </div>
-                  <p id="analyst-narrative-text" class="narrative-prose"></p>
-                </div>
-                <div id="warnings" class="micro orange"></div>
-                <details>
-                  <summary>Probabilities & raw evidence</summary>
-                  <pre id="raw-evidence"></pre>
-                </details>
               </div>
-            </section>
-            <section id="briefing-panel" class="panel briefing-panel" hidden aria-labelledby="briefing-heading">
-              <div class="panel-heading">
-                <div>
-                  <div class="eyebrow">EXECUTIVE BRIEFING</div>
-                  <h2 id="briefing-heading">Verdict at a glance</h2>
-                </div>
-                <span class="briefing-view-tag">5-SEC VERDICT</span>
+              <div class="context-item">
+                <span class="field-label">REVIEW POLICY THRESHOLD</span>
+                <p id="tech-review-context" class="micro">
+                  Review threshold: <strong>0.9419</strong>. Policy selects flows for queueing; it does not alter raw predictions.
+                </p>
               </div>
-              <div id="briefing-empty" class="empty">
-                Select a detection from the feed to view the executive briefing.
-              </div>
-              <div id="briefing-content" hidden>
-                <div class="briefing-verdict-box" id="briefing-verdict-box">
-                  <div class="briefing-verdict-top">
-                    <span class="field-label">DECISION VERDICT</span>
-                    <span id="briefing-flow-ref" class="micro flow-id"></span>
-                  </div>
-                  <div class="briefing-verdict-line">
-                    <h3 id="briefing-verdict-text" class="briefing-verdict-title"></h3>
-                    <span id="briefing-risk-pill" class="badge"></span>
-                  </div>
-                  <div class="briefing-chips">
-                    <span id="briefing-confidence-chip" class="chip"></span>
-                    <span id="briefing-queue-chip" class="chip"></span>
-                    <span id="briefing-candidate-chip" class="candidate" hidden>Anomaly candidate</span>
-                  </div>
-                </div>
+            </div>
 
-                <div class="narrate-trigger-row">
-                  <button id="briefing-narrate-btn" class="button narrate-button" type="button">
-                    <span class="narrate-sparkle">✦</span> Explain in plain English
-                  </button>
-                  <span id="briefing-narrate-status" class="micro narrate-status" role="status" aria-live="polite"></span>
-                </div>
-
-                <div id="briefing-narrative-card" class="narrative-card">
-                  <div class="narrative-header">
-                    <span class="eyebrow">AI NARRATIVE SUMMARY</span>
-                    <span id="briefing-provider-badge" class="provider-badge">Grounded</span>
-                  </div>
-                  <p id="briefing-narrative-text" class="narrative-prose">
-                    Click "Explain in plain English" to translate this detection into an executive summary.
-                  </p>
-                </div>
-
-                <div class="briefing-action-box">
-                  <div class="action-accent-bar"></div>
-                  <div>
-                    <span class="eyebrow">RECOMMENDED ACTION</span>
-                    <p id="briefing-action-text" class="briefing-action-prose">—</p>
-                  </div>
-                </div>
-
-                <details id="briefing-evidence-details" class="briefing-tech-details">
-                  <summary class="briefing-tech-summary">
-                    <span>Show technical evidence (TreeSHAP & scores)</span>
-                  </summary>
-                  <div class="briefing-tech-body">
-                    <div class="score-breakdown">
-                      <div>
-                        <span>Classifier contribution</span><strong id="briefing-classifier-pts"></strong>
-                      </div>
-                      <progress id="briefing-classifier-bar" max="60" value="0"></progress>
-                      <div>
-                        <span>Anomaly contribution</span><strong id="briefing-anomaly-pts"></strong>
-                      </div>
-                      <progress id="briefing-anomaly-bar" max="40" value="0"></progress>
-                    </div>
-                    <div class="explain-title">
-                      <h3>What moved this verdict?</h3>
-                      <span class="small-tag">TreeSHAP</span>
-                    </div>
-                    <div id="briefing-contributions"></div>
-                  </div>
-                </details>
+            <!-- TreeSHAP Margin Contributions -->
+            <div class="shap-section">
+              <div class="explain-title">
+                <h3>What moved this verdict? (TreeSHAP)</h3>
+                <span class="small-tag">TreeSHAP</span>
               </div>
-            </section>
-            <section class="panel distribution">
-              <div class="panel-heading">
-                <div>
-                  <h2>Prediction mix</h2>
-                  <p>Session counts · not benchmark accuracy</p>
-                </div>
+              <p class="shap-disclaimer">
+                <strong>Important note:</strong> Signed TreeSHAP contributions explain the model's raw output margin
+                for this class relative to its expected value. They explain <em>model margin</em>, <strong>not</strong>
+                physical causation, exploit validity, or ground truth.
+              </p>
+              <div id="contributions" class="contributions-list"></div>
+            </div>
+
+            <!-- Suggested Action & Warnings -->
+            <div class="next-step">
+              <span class="eyebrow">SUGGESTED ANALYST ACTION</span>
+              <p id="action"></p>
+            </div>
+
+            <div id="warnings" class="warnings-box" role="status"></div>
+
+            <!-- Plain English Narrative for Technical Mode -->
+            <div class="narrate-trigger-row analyst-narrate">
+              <button id="analyst-narrate-btn" class="button narrate-button secondary-narrate" type="button">
+                <span class="narrate-sparkle" aria-hidden="true">✦</span> Explain in plain English
+              </button>
+              <span id="analyst-narrate-status" class="micro narrate-status" role="status" aria-live="polite"></span>
+            </div>
+
+            <div id="analyst-narrative-card" class="narrative-card" hidden>
+              <div class="narrative-header">
+                <span class="eyebrow">NARRATIVE CAPTION</span>
+                <span id="analyst-provider-badge" class="provider-badge"></span>
               </div>
-              <div id="distribution"></div>
-            </section>
-          </aside>
-        </div>
+              <p id="analyst-narrative-text" class="narrative-prose"></p>
+            </div>
+
+            <!-- Raw Evidence & Probabilities Drawer -->
+            <details class="tech-details-drawer">
+              <summary>View raw probabilities & feature dump</summary>
+              <pre id="raw-evidence" class="code-block"></pre>
+            </details>
+          </div>
+        </section>
+
+        <!-- Prediction Distribution -->
+        <section class="panel distribution-panel">
+          <div class="panel-heading">
+            <div>
+              <span class="eyebrow">SESSION STATS</span>
+              <h2>Prediction mix</h2>
+              <p>Session counts · not benchmark population accuracy</p>
+            </div>
+          </div>
+          <div id="distribution" class="dist-container"></div>
+        </section>
+
+        <!-- Custom Flow Workbench ("Interrogate the model") -->
         <section id="investigate" class="panel input-panel">
           <div class="panel-heading">
             <div>
-              <div class="eyebrow">BRING YOUR OWN FLOW</div>
+              <span class="eyebrow">INTERACTIVE WORKBENCH</span>
               <h2>Interrogate the model</h2>
-              <p>
-                Submit the full 42-feature schema. Scores never trigger
-                automatic blocking.
-              </p>
+              <p>Submit a complete 42-feature schema row. Predictions support human investigation; scores never trigger automatic blocking.</p>
             </div>
-            <a class="text-link" href="/schema" target="_blank" rel="noopener"
-              >Feature schema ↗</a
-            >
+            <a class="text-link" href="/schema" target="_blank" rel="noopener">Feature schema ↗</a>
           </div>
+
           <div class="input-grid">
-            <div>
+            <div class="input-col">
               <div class="input-toolbar">
-                <label
-                  >Load benchmark example
+                <label class="control-label">
+                  <span>Load benchmark example</span>
                   <select id="sample-class">
                     <option>Normal</option>
-                  </select></label
-                ><button id="load-sample" class="button secondary">
-                  Load example
-                </button>
+                  </select>
+                </label>
+                <button id="load-sample" class="button secondary" type="button">Load example</button>
               </div>
-              <label for="payload" class="sr-only">Flow features as JSON</label
-              ><textarea
+              <label for="payload" class="sr-only">Flow features as JSON</label>
+              <textarea
                 id="payload"
                 spellcheck="false"
                 placeholder="Load an example or paste a JSON feature row."
               ></textarea>
             </div>
+
             <div class="input-help">
               <span class="step-number">01 → 02 → 03</span>
               <h3>Load. Adjust. Investigate.</h3>
               <p>
-                Change a flow's bytes, packet counts, or protocol. Compare the
-                verdict and its signed feature contributions.
+                Change a flow's bytes, packet counts, or protocol. Compare the verdict and its signed TreeSHAP contributions.
               </p>
               <p class="micro">
-                Changing a feature is a sensitivity experiment; it does not
-                simulate a real attack. Unknown categories are disclosed.
+                Changing features is a sensitivity experiment; it does not simulate a live attack. Schema errors return HTTP 422.
               </p>
-              <button id="score" class="button primary">Analyze flow →</button>
+              <button id="score" class="button primary" type="button">Analyze flow</button>
               <div id="input-status" role="status" aria-live="polite"></div>
             </div>
           </div>
         </section>
+
+        <!-- Reproducible Evaluation & Limitations Panel -->
         <section id="evidence" class="panel evidence-panel">
           <div class="panel-heading">
             <div>
-              <div class="eyebrow">REPRODUCIBLE EVALUATION</div>
+              <span class="eyebrow">REPRODUCIBLE BENCHMARK AUDIT</span>
               <h2>Evidence before confidence</h2>
-              <p>
-                Full held-out test split. These metrics are independent of the
-                balanced replay.
-              </p>
+              <p>Full 82,332 held-out test split evaluation. These metrics are independent of the balanced replay.</p>
             </div>
-            <a href="/metrics" class="text-link" target="_blank" rel="noopener"
-              >Download metrics ↗</a
-            >
+            <a href="/metrics" class="text-link" target="_blank" rel="noopener">Download metrics JSON ↗</a>
           </div>
+
           <div class="evidence-metrics">
-            <div>
-              <span>Multiclass accuracy</span
-              ><strong id="eval-accuracy">—</strong>
+            <div class="metric-stat">
+              <span>Multiclass accuracy</span>
+              <strong id="eval-accuracy">—</strong>
             </div>
-            <div><span>Macro F1</span><strong id="eval-f1">—</strong></div>
-            <div>
-              <span>Raw attack recall</span><strong id="eval-recall">—</strong>
+            <div class="metric-stat">
+              <span>Macro F1</span>
+              <strong id="eval-f1">—</strong>
             </div>
-            <div>
-              <span>Raw false positive rate</span
-              ><strong id="eval-fpr">—</strong>
+            <div class="metric-stat">
+              <span>Raw attack recall</span>
+              <strong id="eval-recall">—</strong>
+            </div>
+            <div class="metric-stat">
+              <span>Raw false positive rate</span>
+              <strong id="eval-fpr">—</strong>
             </div>
           </div>
-          <p id="evaluation-context" class="evidence-context">
-            Loading evaluation…
-          </p>
+
+          <p id="evaluation-context" class="evidence-context">Loading evaluation…</p>
           <p id="review-policy" class="evidence-context"></p>
+
           <div class="table-scroll">
-            <table class="evaluation-table">
+            <table class="evaluation-table" aria-label="Per-class model evaluation">
               <thead>
                 <tr>
-                  <th>Class</th>
-                  <th>Precision</th>
-                  <th>Recall</th>
-                  <th>F1</th>
-                  <th>Test support</th>
+                  <th scope="col">Class</th>
+                  <th scope="col">Precision</th>
+                  <th scope="col">Recall</th>
+                  <th scope="col">F1</th>
+                  <th scope="col">Test support</th>
                 </tr>
               </thead>
               <tbody id="class-metrics"></tbody>
             </table>
           </div>
-          <details>
-            <summary>
-              Confusion matrix — true class rows, predicted class columns
-            </summary>
+
+          <details class="tech-details-drawer">
+            <summary>Confusion matrix — true class rows, predicted class columns</summary>
             <div class="table-scroll" id="confusion"></div>
           </details>
+
           <div class="evidence-notes">
-            <p>
-              <strong>Limits belong in the result.</strong> UNSW-NB15 is a lab
-              benchmark from 2015. Model scores are uncalibrated; rare classes
-              and distribution shifts remain difficult. An anomaly is not proof
-              of an exploit.
-            </p>
-            <p id="limitations"></p>
+            <div class="note-box">
+              <h4>Known Weak Classes</h4>
+              <p>
+                Analysis recall is <strong>8.27%</strong>; Backdoor recall is <strong>9.26%</strong>. Do not present this model as reliable for those attacks. Worms has only 44 test rows.
+              </p>
+            </div>
+            <div class="note-box">
+              <h4>Data Audit & Provenance</h4>
+              <p id="limitations"></p>
+            </div>
           </div>
         </section>
-        <footer>
-          <span><strong>NIDA</strong> / explainable network flow triage</span
-          ><span
-            >Research prototype · human review required ·
-            <a
-              href="https://research.unsw.edu.au/projects/unsw-nb15-dataset"
-              target="_blank"
-              rel="noopener"
-              >UNSW-NB15 attribution ↗</a
-            ></span
+      </section>
+
+      <!-- App Footer -->
+      <footer class="app-footer" role="contentinfo">
+        <div class="footer-left">
+          <strong>NIDA</strong> / Explainable Network Flow Triage Prototype
+        </div>
+        <div class="footer-right">
+          Research prototype · Human review required ·
+          <a
+            href="https://research.unsw.edu.au/projects/unsw-nb15-dataset"
+            target="_blank"
+            rel="noopener"
           >
-        </footer>
-      </main>
-    </div>
+            UNSW-NB15 Attribution ↗
+          </a>
+        </div>
+      </footer>
+    </main>
   </body>
 </html>

@@ -31,12 +31,18 @@ def browser_page(tmp_path_factory):
         port = probe.getsockname()[1]
     url = f"http://127.0.0.1:{port}"
     log_path = tmp_path_factory.mktemp("server") / "server.log"
+    server_env = os.environ.copy()
+    server_env["LLM_PROVIDER"] = "none"
+    server_env["GROQ_API_KEY"] = ""
+    server_env["GEMINI_API_KEY"] = ""
+    server_env["LLM_API_KEY"] = ""
     with log_path.open("w") as log:
         server = subprocess.Popen(
             [sys.executable, "-m", "uvicorn", "main:app", "--host", "127.0.0.1", "--port", str(port)],
             cwd=ROOT,
             stdout=log,
             stderr=log,
+            env=server_env,
         )
         try:
             for _ in range(150):
@@ -104,6 +110,8 @@ def test_replay_controls_and_inspection(browser_page):
 
 def test_custom_inference_and_validation(browser_page):
     page, errors, _ = browser_page
+    if page.locator("#mode-technical-btn").is_visible():
+        page.locator("#mode-technical-btn").click()
     page.locator("#sample-class").select_option("Normal")
     page.get_by_role("button", name="Load example").click()
     page.wait_for_function(
@@ -116,6 +124,14 @@ def test_custom_inference_and_validation(browser_page):
     page.locator("#payload").fill("{}")
     page.get_by_role("button", name="Analyze flow").click()
     expect(page.locator("#input-status")).to_contain_text("Flow rejected")
+
+    # Missing service regression test through UI
+    bad_features = dict(features)
+    del bad_features["service"]
+    page.locator("#payload").fill(json.dumps(bad_features))
+    page.get_by_role("button", name="Analyze flow").click()
+    expect(page.locator("#input-status")).to_contain_text("Flow rejected")
+
     # The browser logs the expected 422 request; not a JS application failure.
     errors[:] = [e for e in errors if "422" not in e]
     features["proto"] = "<img src=x onerror=alert(1)>"
@@ -123,6 +139,109 @@ def test_custom_inference_and_validation(browser_page):
     page.get_by_role("button", name="Analyze flow").click()
     expect(page.locator("#warnings")).to_contain_text("<img")
     assert page.locator("#warnings img").count() == 0
+    assert not errors
+
+
+def test_first_time_visitor_and_understand_journey(browser_page):
+    page, errors, url = browser_page
+    page.goto(url)
+    page.evaluate("() => localStorage.clear()")
+    page.goto(url)
+    expect(page.locator("#view-understand")).to_be_visible()
+    expect(page.locator("#view-technical")).to_be_hidden()
+
+    expect(page.locator("#understand-hero-title")).to_have_text("Which connections deserve a closer look?")
+    expect(page.locator(".understand-hero")).to_contain_text("human")
+    expect(page.locator("#loading-screen")).to_be_hidden(timeout=12000)
+
+    # Benchmark disclaimer notice is prominent
+    expect(page.locator(".benchmark-disclaimer")).to_contain_text("Benchmark replay")
+    expect(page.locator(".benchmark-disclaimer")).to_contain_text("UNSW-NB15")
+
+    # Guided archetype selection
+    page.locator("#archetype-generic").click()
+    expect(page.locator("#guided-verdict-badge")).to_have_text("Generic")
+    expect(page.locator(".uncertainty-callout")).to_contain_text("not proof of an attack")
+    expect(page.locator("#guided-step-observation")).not_to_contain_text("standard byte count")
+
+    # Plain English explanation (rule-based fallback when offline)
+    page.locator("#briefing-narrate-btn").click()
+    expect(page.locator("#briefing-narrate-status")).to_contain_text("AI not configured")
+    expect(page.locator("#briefing-provider-badge")).to_contain_text("Built-in explanation (Rule-based)")
+    expect(page.locator("#briefing-narrative-text")).not_to_be_empty()
+
+    # Plain language glossary
+    page.locator(".glossary-card summary").click()
+    expect(page.locator(".glossary-card")).to_contain_text("Connection record")
+    expect(page.locator(".glossary-card")).to_contain_text("Review recommended")
+    expect(page.locator(".glossary-card")).to_contain_text("Anomaly candidate")
+    assert not errors
+
+
+def test_theme_persists_across_reload_and_loading_ends(browser_page):
+    page, errors, url = browser_page
+    page.goto(url)
+    page.evaluate("() => localStorage.setItem('nida_theme', 'light')")
+    page.reload()
+    expect(page.locator("#loading-screen")).to_be_hidden(timeout=12000)
+    page.locator("#theme-toggle").click()
+    assert page.locator("html").get_attribute("data-theme") == "dark"
+    assert (
+        page.locator("#archetype-normal").evaluate("el => getComputedStyle(el).backgroundColor")
+        != "rgb(255, 255, 255)"
+    )
+    page.reload()
+    expect(page.locator("#loading-screen")).to_be_hidden(timeout=12000)
+    assert page.locator("html").get_attribute("data-theme") == "dark"
+    page.locator("#theme-toggle").click()
+    assert page.locator("html").get_attribute("data-theme") == "light"
+    assert not errors
+
+
+def test_loading_screen_waits_for_startup(browser_page):
+    page, errors, url = browser_page
+
+    def slow_metrics(route):
+        time.sleep(0.6)
+        route.continue_()
+
+    page.route("**/metrics", slow_metrics)
+    page.goto(url, wait_until="domcontentloaded")
+    expect(page.locator("#loading-screen")).to_be_visible()
+    expect(page.locator("#loading-screen")).to_be_hidden(timeout=12000)
+    page.unroute("**/metrics", slow_metrics)
+    assert not errors
+
+
+def test_mode_switching_preserves_selected_flow(browser_page):
+    page, errors, url = browser_page
+    page.goto(url)
+    page.locator("#mode-understand-btn").click()
+    page.wait_for_selector("#flows tr:nth-child(2)", timeout=10000)
+
+    # Select the second flow row
+    row = page.locator("#flows tr").nth(1)
+    row.click()
+    flow_id_text = page.locator("#guided-flow-id").inner_text()
+    verdict_text = page.locator("#guided-verdict-badge").inner_text()
+    assert flow_id_text != "—"
+
+    # Switch to Technical mode
+    page.locator("#mode-technical-btn").click()
+    expect(page.locator("#view-technical")).to_be_visible()
+    expect(page.locator("#view-understand")).to_be_hidden()
+
+    # Evidence dossier reflects the exact same flow
+    expect(page.locator("#selected-verdict")).to_have_text(verdict_text)
+    assert page.locator("#contributions .contribution").count() == 6
+    assert page.locator("#classifier-bar").is_visible()
+
+    # Switch back to Understand mode
+    page.locator("#mode-understand-btn").click()
+    expect(page.locator("#view-understand")).to_be_visible()
+    expect(page.locator("#view-technical")).to_be_hidden()
+    expect(page.locator("#guided-flow-id")).to_have_text(flow_id_text)
+    expect(page.locator("#guided-verdict-badge")).to_have_text(verdict_text)
     assert not errors
 
 

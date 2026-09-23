@@ -175,10 +175,13 @@ async def predict(payload: dict = Body(...), explain: bool = Query(True), narrat
         # Bound work dispatched to the worker pool; event loop stays responsive.
         async with app.state.inference_slots:
             result = await run_in_threadpool(bundle().score_row, payload, explain or narrate)
+        # Generate grounded built-in non-AI explanation derived purely from model verdict & SHAP
+        result["builtin_explanation"] = llm_narrator.get_builtin_explanation(result)
+
         if narrate:
             if not llm_narrator.is_available():
                 result["narrative"] = None
-                result["narrative_status"] = "unavailable"
+                result["narrative_status"] = "not_configured"
             else:
                 try:
                     narrative = await llm_narrator.aget_flow_narrative(payload, result)
@@ -194,7 +197,7 @@ async def predict(payload: dict = Body(...), explain: bool = Query(True), narrat
                         result["narrative"] = None
                         result["narrative_status"] = "unavailable"
                 except Exception as exc:
-                    logger.warning("Failed to generate narrative: %s", exc)
+                    logger.warning("Failed to generate narrative: %s", type(exc).__name__)
                     result["narrative"] = None
                     result["narrative_status"] = "unavailable"
             if not explain and "explanation" in result:

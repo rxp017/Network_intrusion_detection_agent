@@ -1,224 +1,167 @@
 # NIDA — Network Intrusion Detection Agent
 
-**Signal. Evidence. Action.** A network-flow investigation workspace that joins attack classification, anomaly detection, per-flow explanations, and an explicit analyst review policy.
+> **One-sentence summary:** NIDA is an explainable decision-support dashboard that inspects network connection summaries from the UNSW-NB15 benchmark, classifies attack types with XGBoost, flags unusual traffic with Isolation Forest, and presents human-readable feature evidence so security analysts can triage alerts without guessing.
 
 [![Verify NIDA](https://github.com/rxp017/Network_intrusion_detection_agent/actions/workflows/ci.yml/badge.svg)](https://github.com/rxp017/Network_intrusion_detection_agent/actions/workflows/ci.yml)
 
-[Three-minute demo](docs/DEMO.md) · [Model card](docs/MODEL_CARD.md) · [Audit & verification](docs/AUDIT.md) · [Data provenance](docs/DATA_SOURCES.md)
+[Three-minute demo script](docs/DEMO.md) · [Model card](docs/MODEL_CARD.md) · [Audit & verification](docs/AUDIT.md) · [Data provenance](docs/DATA_SOURCES.md)
 
-![NIDA desktop workspace](docs/images/dashboard.png)
+---
 
-## What you can demonstrate
+## Visual Workspace: Two Presentation Modes
 
-- **Explain an individual verdict.** Native XGBoost TreeSHAP shows the signed feature contributions for the selected flow.
-- **Manage the noise.** A review threshold chosen from validation normals reduces false alarms, with the recall tradeoff measured on held-out data.
-- **Investigate interactively.** Pause/resume replay, select a scenario, filter the queue, inspect raw features, edit a JSON flow, and export a session.
-- **Show the evidence.** Per-class metrics, confusion matrix, weak classes, source hashes, and a majority baseline are visible and reproducible.
-- **Run without venue Wi-Fi.** Once dependencies are installed, inference, replay, charts, styles, and fonts work locally. The optional Swagger documentation uses a CDN.
+NIDA offers two genuinely different presentation modes sharing the identical scoring engine, 400-flow replay stream, and REST/WebSocket API:
 
-**Scope:** This is a research prototype operating on UNSW-NB15 feature rows. The dashboard replays benchmark data; it does not capture packets, discover devices, or block traffic. An anomaly candidate is not a verified zero-day exploit.
+### 1. "Understand" Mode (Default for Non-Technical Visitors)
+Designed for visitors with no cybersecurity or machine learning background. The opening screen states the purpose and shows the record → model → human-review path. A selected example shows the verdict and next step; key terms are available in a collapsible glossary.
 
-## Run locally
+![NIDA Understand Mode](docs/images/understand_desktop.png)
 
-**Tested runtime: CPython 3.14.7.** Use Python 3.14 with the pinned dependencies; the bundled scikit-learn artifacts depend on compatible versions.
+### 2. "Technical" Mode (For Security Analysts, Reviewers, and Judges)
+Maintains the complete, rigorous analytical evidence dossier: 10-class probability distribution, per-flow TreeSHAP signed margin contributions, exact risk decomposition ($60 \times (1 - P(\text{Normal})) + 40 \times \text{anomaly\_pct}$), Isolation Forest cutoff, custom JSON flow workbench, and held-out benchmark evaluation with confusion matrix.
 
-### Windows
+![NIDA Technical Mode](docs/images/technical_desktop.png)
 
-Double-click `run.bat`, or:
+---
 
+## What the System Can and Cannot Do
+
+To avoid common machine learning and security hype, NIDA's research boundaries are explicitly documented:
+
+| Capability | Supported in NIDA? | Engineering Grounding |
+| :--- | :---: | :--- |
+| **Inspect UNSW-NB15 Flow Rows** | **YES** | Validates and ingests complete 42-feature precomputed connection summaries. |
+| **XGBoost Attack Classification** | **YES** | 10-class multiclass classifier (Normal + 9 attack families). |
+| **Novelty / Anomaly Detection** | **YES** | Benign-only Isolation Forest trained exclusively on clean validation normals. |
+| **Per-Flow TreeSHAP Evidence** | **YES** | Fast, exact TreeSHAP signed feature contributions explaining predicted class margin. |
+| **Selective Human Review Policy** | **YES** | Validation-derived 94.19% threshold isolates high-risk traffic, cutting false positives to 4.5%. |
+| **100% Offline Local Operation** | **YES** | Zero external fonts, CDNs, databases, or API keys required to run the workspace. |
+| **Capture Live Network Packets** | ❌ **NO** | NIDA does not capture live packets (no `libpcap`, `scapy`, or raw network interface drivers). |
+| **Discover Network Devices** | ❌ **NO** | NIDA does not discover network topology, hosts, or device configurations. |
+| **Block Traffic or Modify Firewalls**| ❌ **NO** | NIDA is strictly a decision-support prototype. It never autonomously blocks IP addresses or flows. |
+| **Detect Zero-Day Exploits** | ❌ **NO** | Statistical anomaly candidates indicate deviation from normal baselines, not proof of an exploit. |
+| **Probability of Real-World Harm** | ❌ **NO** | Heuristic risk score (0–100) is an operational triage priority, not an actuarial probability of damage. |
+| **Establish Physical Causation** | ❌ **NO** | TreeSHAP values describe the model's mathematical log-odds margin, not real-world causality. |
+
+---
+
+## Quickstart: Run the Offline Demo
+
+**Tested runtime: CPython 3.14.7.** Works entirely offline without internet, API keys, or dataset downloads.
+
+### Windows (PowerShell)
 ```powershell
 py -3.14 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-.\.venv\Scripts\python.exe main.py
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+python main.py
 ```
 
-### macOS / Linux
-
+### macOS / Linux (Bash)
 ```bash
 python3.14 -m venv .venv
-.venv/bin/python -m pip install -r requirements.txt
-.venv/bin/python main.py
+source .venv/bin/activate
+pip install -r requirements.txt
+python main.py
 ```
 
-Open **http://127.0.0.1:8000**. The trained models and 400-flow replay are included. No API keys, training step, database, or dataset download is needed to run the demo.
+Open **[http://127.0.0.1:8000](http://127.0.0.1:8000)** in any modern browser.
+- The pre-trained model bundle and 400-flow balanced replay dataset are bundled in the repository.
+- Switching between **Understand** and **Technical** modes preserves your selected flow.
+- The opening view explains the project in one screen; the theme button switches between light and dark and remembers your choice.
+- Replay controls let you pause, resume, adjust speed (0.15s to 1.5s), and filter by scenario or risk level.
 
-The server binds to loopback by default. `NIDA_HOST`, `NIDA_PORT`, and `NIDA_ARTIFACTS_DIR` override the bind address, port, and trusted artifact directory. Restart after replacing a model bundle. Do not expose the unauthenticated API publicly.
+---
 
-### AI Narrative Layer (optional)
+## Optional: Configuring AI Plain-English Explanations
 
-NIDA runs **fully offline with zero API keys and zero internet access** by default.
+By default, NIDA runs **100% offline with zero outbound network calls**. Clicking **Generate explanation** generates an evidence-grounded, rule-based summary labeled `Built-in explanation (Rule-based)` and displays the status `AI not configured`.
 
-An optional, on-demand plain-English narrative layer can be enabled by creating a `.env` file (copy from `.env.example`) or setting environment variables:
+If you wish to enable live AI briefings via Groq or Google Gemini:
 
-- `GROQ_API_KEY`: Groq API key for low-latency (~300ms) plain-English flow explanations.
-- `GEMINI_API_KEY`: Google Gemini API key.
-- `LLM_PROVIDER`: Provider mode (`"waterfall"`, `"groq"`, `"gemini"`, or `"none"`, default: `"waterfall"` when keys are set).
-  - **Waterfall mode**: Tries Groq first for speed. If Groq hits a rate limit (HTTP 429), quota exhaustion, or error, it seamlessly and automatically fails over to Gemini!
-- `GROQ_MODEL` / `GEMINI_MODEL`: Optional model overrides (defaults to `llama-3.3-70b-versatile` and `gemini-2.5-flash`).
+1. **Copy the example configuration to `.env`** (this file is gitignored and will never be committed to Git):
+   ```powershell
+   Copy-Item .env.example .env
+   # On macOS/Linux: cp .env.example .env
+   ```
+2. **Paste your API key(s) into `.env`**:
+   ```ini
+   # Groq API Key (https://console.groq.com/keys)
+   GROQ_API_KEY=your_groq_api_key_here
 
-**Zero Event-Loop Blocking**: LLM requests run on a fully asynchronous non-blocking pipeline (`httpx.AsyncClient` with `asyncio.sleep` rate-limiting). Outbound LLM calls never freeze the FastAPI event loop, and `/ws/stream` replay streaming continues smoothly without latency spikes or pauses.
+   # Google Gemini API Key (https://aistudio.google.com/apikey)
+   GEMINI_API_KEY=your_gemini_api_key_here
 
-When `LLM_PROVIDER=none` or if no keys are supplied, the narrative layer is gracefully marked unavailable in the UI, and all inference, replay, and SHAP features continue functioning offline. LLM calls are strictly on-demand (triggered only when clicking "✦ Explain in plain English" on a selected flow) and are never invoked during replay streaming or batch inference.
+   # Mode: waterfall (tries Groq first, fails over to Gemini on 429 quota exhaustion)
+   LLM_PROVIDER=waterfall
+   ```
+3. **Restart the server**:
+   ```powershell
+   python main.py
+   ```
 
-### Optional container
+### Safe & Non-Blocking Design Guarantees
+- **Never committed to Git**: `.env` is listed in `.gitignore` (`.env`, `.env.*`). Never commit API keys.
+- **Credential Protection**: Gemini keys are passed strictly through the `x-goog-api-key` HTTP header, never in URL query strings (`?key=...`), preventing credential leakage in access logs or browser history.
+- **Zero Event-Loop Freezes**: LLM calls run asynchronously via `httpx.AsyncClient` with in-memory caching and a 2-second rate-limiter. Outbound calls never freeze the FastAPI event loop, and WebSocket replay streams continue uninterrupted.
+- **Truthful Status Reporting**: The UI explicitly discloses the backend state: `"AI not configured"`, `"AI service unavailable"`, or `"AI explanation ready"`. If external providers fail or quota is exhausted, NIDA seamlessly displays the grounded rule-based explanation.
+
+---
+
+## Measured Benchmark Results
+
+Model `0013990bc956`, evaluated on **82,332 held-out flows** from UNSW-NB15 (training uses 175,341 rows after removing cross-split overlaps and duplicate feature rows).
+
+| Measure | Result | Notes |
+| :--- | :---: | :--- |
+| **Multiclass Accuracy** | **72.89%** | 10 classes (Majority-class baseline: 44.94%) |
+| **Macro F1 Score** | **0.538** | Balanced across all 10 attack categories |
+| **Raw Attack Recall** | **98.86%** | High sensitivity before review filtering |
+| **Raw False Positive Rate** | **33.41%** | Unfiltered model generates excessive false alarms |
+| **Review Queue Attack Recall** | **89.42%** | Captures 89.4% of attacks with 96.0% precision |
+| **Review Queue False Positive Rate** | **4.52%** | Filtered by policy threshold ($P(\text{attack}) \ge 0.9419$) |
+| **Inference Latency (p95)** | **35.1 ms** | Dual model inference + exact TreeSHAP computation |
+
+> [!WARNING]
+> **Known Weak Classes:** Analysis recall is **8.27%** ($n=677$); Backdoor recall is **9.26%** ($n=583$). Worms has only **44** test rows. NIDA discloses these benchmark weaknesses visibly in the Technical mode audit drawer.
+
+---
+
+## Full Verification Sequence
+
+To reproduce repository quality gates and browser verification:
 
 ```bash
-docker build -t nida .
-docker run --rm -p 127.0.0.1:8000:8000 nida
-```
-
-The image runs as a non-root user. Docker was not available in the local verification environment; this recipe is provided but not claimed as tested.
-
-## Measured results
-
-Model `0013990bc956`, evaluated on **82,332 held-out flows**. Training uses the published 175,341-row split after duplicate cleanup; exact cross-split feature overlaps are removed from training.
-
-| Measure | Result |
-|---|---:|
-| Multiclass accuracy | **72.89%** |
-| Majority-class baseline | 44.94% |
-| Macro F1 across 10 classes | 0.538 |
-| Raw classifier attack recall | 98.86% |
-| Raw classifier false-positive rate | 33.41% |
-| **Review queue attack recall** | **89.42%** |
-| **Review queue precision** | **96.04%** |
-| **Review queue false-positive rate** | **4.52%** |
-| Local inference including TreeSHAP, median / p95 | 30.7 / 35.1 ms |
-
-The review queue is a separate policy, not an improved multiclass accuracy score. It prioritizes flows with `P(attack) >= 0.9418844` or an anomaly-candidate flag. The threshold is the 99th percentile of attack scores on validation normals. Its held-out false-positive rate is higher than the 1% calibration target: distribution shift remains visible.
-
-Analysis and Backdoor recall are poor; Worms has only 44 test examples. Unqueued flows are not certified safe. The balanced replay is deliberately useful for demonstrating every class and is **never** used to calculate these benchmark metrics.
-
-[Complete metrics](artifacts/evaluation.json) · [Independent recomputation and timing](verification/evaluation.json) · [Limitations](docs/MODEL_CARD.md)
-
-## Architecture
-
-```mermaid
-flowchart LR
-    A[42-feature flow] --> B[Schema validation]
-    B --> C[Shared training / inference encoder]
-    C --> D[XGBoost classifier]
-    C --> E[Benign-only Isolation Forest]
-    D --> F[Per-flow TreeSHAP]
-    D --> G[Risk and review policy]
-    E --> G
-    F --> H[Analyst workspace]
-    G --> H
-    H --> I[Human investigation / JSON export]
-```
-
-### Risk and novelty
-
-```text
-attack_score = 1 - P(Normal)
-anomaly_percentile = fraction of validation-normal scores >= this raw anomaly score
-risk = round(60 × attack_score + 40 × anomaly_percentile)
-
-anomaly_candidate = predicted Normal AND raw anomaly < validation-normal 1st percentile
-review_recommended = attack_score >= review threshold OR anomaly_candidate
-```
-
-Risk tiers: low <25, medium <50, high <75, critical ≥75. These are prioritization heuristics, not calibrated probabilities of harm. Class scores, risk, and review decisions remain separate in the API.
-
-TreeSHAP contributions explain the **predicted class's raw margin**. They are additive in margin space, not probability space; they do not establish causation. The UI shows the six strongest contributions and the original feature row.
-
-## API
-
-| Endpoint | Purpose |
-|---|---|
-| `GET /health` | Loaded model ID, classes, replay readiness |
-| `GET /schema` | Required fields, numeric bounds, known categories |
-| `GET /sample?category=Normal` | Labelled benchmark example, with inference features separated |
-| `POST /predict` | One flow, scores, review decision, warnings, TreeSHAP |
-| `POST /predict?explain=false` | Inference without TreeSHAP |
-| `POST /predict/batch` | 1–100 flows; no per-flow TreeSHAP |
-| `GET /metrics` | Full held-out metrics, confusion matrix, validation selection |
-| `GET /limitations` | Weak classes and deployment limitations |
-| `GET /explain/{class}` | Global feature gain; explicitly distinct from per-flow evidence |
-| `WS /ws/stream` | Labelled replay; `category`, `interval` (0.1–3 s), `offset` |
-| `GET /docs` | Interactive OpenAPI documentation |
-
-A runnable example:
-
-```python
-import json
-from urllib.request import Request, urlopen
-
-sample = json.load(urlopen("http://127.0.0.1:8000/sample?category=Generic"))
-request = Request(
-    "http://127.0.0.1:8000/predict",
-    data=json.dumps(sample["features"]).encode(),
-    headers={"Content-Type": "application/json"},
-)
-result = json.load(urlopen(request))
-print(result["predicted_attack_cat"], result["review_recommended"])
-print(result["explanation"]["features"])
-```
-
-All 42 features are required. Numeric features must be finite numbers between 0 and 1e15; numeric strings, booleans, nulls, and negative values are rejected. Unknown field names fail validation. Unseen protocol/service/state categories are accepted with a visible all-zero encoding warning. `id`, `label`, and `attack_cat` are ignored metadata and cannot influence predictions.
-
-Bodies are limited to 256 KiB. Replay allows eight concurrent clients per process; inference is dispatched off the event loop through four worker slots. These bounds are safeguards, not a production capacity guarantee.
-
-## Reproduce training and evaluation
-
-```bash
-python scripts/download_data.py
-python train.py
-python scripts/verify_evaluation.py
-```
-
-Use the virtual environment's Python, or activate it first.
-
-1. Download the pinned mirror revision and verify both CSV SHA-256 hashes.
-2. Map the reversed mirror filenames to the publisher's documented split sizes.
-3. Remove 10,279 training rows whose features occur in the test split; then remove 65,324 within-training duplicate feature rows.
-4. Stratify the remaining 99,738 rows into 79,790 fit and 19,948 validation/calibration rows (seed 42).
-5. Fit the encoder and models on the fit partition. Compare two fixed weighting choices using **validation macro F1**.
-6. Set anomaly and review thresholds on validation normals. Report final results on the original held-out test split.
-7. Save a hash-checked model bundle and a deterministic 40-per-class replay.
-
-The full CSVs stay in ignored `data/raw/`. The included replay is a balanced benchmark sample. `generate_sample_data.py` creates explicitly synthetic, randomly labelled **negative-control fixtures** in `data/synthetic/`; it cannot overwrite the benchmark files and is not used by training.
-
-## Verification
-
-```bash
-python -m pip install -r requirements-dev.txt
+# 1. Dependency integrity
 python -m pip check
+
+# 2. Python code quality & style
 ruff check .
 ruff format --check .
+
+# 3. Vanilla JavaScript syntax
 node --check static/dashboard.js
+node --check static/boot.js
+
+# 4. Pytest unit & integration test suite (62 tests)
 python -m pytest -m "not browser" -q
+
+# 5. Playwright Chromium browser tests (7 end-to-end journey tests)
 python -m playwright install chromium
-```
-
-Browser tests (isolated server, Chromium, desktop and 390 px mobile):
-
-```powershell
+# PowerShell:
 $env:NIDA_BROWSER_TESTS = "1"
-python -m pytest -m browser -q
+python -m pytest -m browser -v
+# Bash:
+# NIDA_BROWSER_TESTS=1 python -m pytest -m browser -v
+
+# 6. Git whitespace and conflict check
+git diff --check
 ```
 
-On macOS/Linux: `NIDA_BROWSER_TESTS=1 python -m pytest -m browser -q`.
+CI runs these exact checks on Linux via `.github/workflows/ci.yml`.
 
-The suite checks strict validation, label isolation, training/serving encoding consistency, TreeSHAP additivity, artifact corruption, stream resume/origin checks, queue policy, offline dashboard operation, keyboard interaction, export, and injection-safe rendering. CI repeats lint, API/model tests, and Chromium tests on Linux; see the badge for its actual status.
+---
 
-## Repository map
+## Dataset Attribution
 
-```text
-main.py                    FastAPI boundary, REST, replay WebSocket
-model.py                   Shared encoder, artifact integrity, inference, TreeSHAP
-train.py                   Deterministic fitting, calibration, benchmark reports
-static/ + dashboard.html   Local, dependency-free analyst workspace
-artifacts/                 Trained models, manifest, evaluation and model metadata
-data/replay.csv            400 labelled held-out examples; provenance in replay.json
-scripts/                   Pinned dataset fetcher and independent verification
-tests/                     Model, API, WebSocket and browser checks
-docs/                      Model card, demo script, audit, source attribution
-verification/              Recomputed metrics and local timing evidence
-```
-
-## Dataset credit
-
-UNSW-NB15 was created by Nour Moustafa and Jill Slay at UNSW Canberra. Dataset rights remain with the authors. Academic research use and citation requirements are described on the [official dataset page](https://research.unsw.edu.au/projects/unsw-nb15-dataset); commercial use requires agreement with its authors. See [full provenance and citations](docs/DATA_SOURCES.md).
-
-NIDA makes no claim of production readiness, previously unseen exploit detection, or guaranteed hackathon placement.
+UNSW-NB15 was created by Nour Moustafa and Jill Slay at UNSW Canberra. Academic research use and citation requirements are described on the [official UNSW-NB15 dataset portal](https://research.unsw.edu.au/projects/unsw-nb15-dataset). See [full provenance and citations](docs/DATA_SOURCES.md).
