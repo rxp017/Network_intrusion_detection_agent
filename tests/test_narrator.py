@@ -107,9 +107,9 @@ def test_groq_adapter_success_sync(monkeypatch):
     }
 
     mock_urlopen = MagicMock()
-    mock_urlopen.return_value.__enter__.return_value.read.return_value = json.dumps(
-        mock_resp_payload
-    ).encode("utf-8")
+    mock_urlopen.return_value.__enter__.return_value.read.return_value = json.dumps(mock_resp_payload).encode(
+        "utf-8"
+    )
 
     with patch("urllib.request.urlopen", mock_urlopen):
         narrative = llm_narrator.generate_narrative(
@@ -128,6 +128,7 @@ def test_groq_adapter_success_sync(monkeypatch):
 
 def test_waterfall_failover_on_rate_limit_429(monkeypatch):
     """When Groq returns HTTP 429 (rate limit), it seamlessly falls over to Gemini."""
+
     async def _test():
         monkeypatch.setenv("GROQ_API_KEY", "gsk-quota-exhausted")
         monkeypatch.setenv("GEMINI_API_KEY", "gemini-working-key")
@@ -184,6 +185,7 @@ def test_waterfall_failover_on_rate_limit_429(monkeypatch):
 
 def test_waterfall_all_providers_fail(monkeypatch):
     """When both providers hit rate limits or errors, safe fallback is returned without crash."""
+
     async def _test():
         monkeypatch.setenv("GROQ_API_KEY", "gsk-fail")
         monkeypatch.setenv("GEMINI_API_KEY", "gemini-fail")
@@ -215,6 +217,7 @@ def test_event_loop_unblocked_during_llm_call(monkeypatch):
     Demonstrates that while an outbound LLM request is awaiting network I/O,
     the asyncio event loop is NEVER blocked. Concurrent coroutines execute freely.
     """
+
     async def _test():
         monkeypatch.setenv("GROQ_API_KEY", "gsk-async-test")
         monkeypatch.setenv("LLM_PROVIDER", "groq")
@@ -290,9 +293,9 @@ def test_in_memory_cache(monkeypatch):
     }
 
     mock_urlopen = MagicMock()
-    mock_urlopen.return_value.__enter__.return_value.read.return_value = json.dumps(
-        mock_resp_payload
-    ).encode("utf-8")
+    mock_urlopen.return_value.__enter__.return_value.read.return_value = json.dumps(mock_resp_payload).encode(
+        "utf-8"
+    )
 
     sample_features = {"dur": 0.1, "proto": "tcp", "sbytes": 100}
     sample_result = {
@@ -301,9 +304,7 @@ def test_in_memory_cache(monkeypatch):
         "risk_score": 65,
         "risk_level": "high",
         "review_recommended": True,
-        "explanation": {
-            "features": [{"feature": "sbytes", "encoded_value": 100, "contribution": 0.4}]
-        },
+        "explanation": {"features": [{"feature": "sbytes", "encoded_value": 100, "contribution": 0.4}]},
     }
 
     with patch("urllib.request.urlopen", mock_urlopen):

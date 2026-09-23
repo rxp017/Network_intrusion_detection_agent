@@ -92,25 +92,27 @@ def run():
                     route.fulfill(
                         status=200,
                         content_type="application/json",
-                        body=json.dumps({
-                            "predicted_attack_cat": "DoS",
-                            "confidence": 0.942,
-                            "risk_score": 78,
-                            "risk_level": "critical",
-                            "risk_components": {"classifier": 52.0, "anomaly": 26.0},
-                            "review_recommended": True,
-                            "recommended_action": "Verify destination host availability and enforce upstream rate limiting.",
-                            "warnings": [],
-                            "narrative": mock_narrative,
-                            "narrative_status": "ok",
-                            "inference_ms": 14.5,
-                            "explanation": {
-                                "features": [
-                                    {"feature": "sbytes", "contribution": 1.45, "encoded_value": 45000},
-                                    {"feature": "rate", "contribution": 0.88, "encoded_value": 12000},
-                                ]
-                            },
-                        }),
+                        body=json.dumps(
+                            {
+                                "predicted_attack_cat": "DoS",
+                                "confidence": 0.942,
+                                "risk_score": 78,
+                                "risk_level": "critical",
+                                "risk_components": {"classifier": 52.0, "anomaly": 26.0},
+                                "review_recommended": True,
+                                "recommended_action": "Verify destination host availability and enforce upstream rate limiting.",
+                                "warnings": [],
+                                "narrative": mock_narrative,
+                                "narrative_status": "ok",
+                                "inference_ms": 14.5,
+                                "explanation": {
+                                    "features": [
+                                        {"feature": "sbytes", "contribution": 1.45, "encoded_value": 45000},
+                                        {"feature": "rate", "contribution": 0.88, "encoded_value": 12000},
+                                    ]
+                                },
+                            }
+                        ),
                     )
                 else:
                     route.continue_()

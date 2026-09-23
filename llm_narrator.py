@@ -61,11 +61,13 @@ _ASYNC_RATE_LOCK = asyncio.Lock()
 
 class ProviderQuotaExceeded(Exception):
     """Raised when an LLM provider returns 429 Too Many Requests or quota exhaustion."""
+
     pass
 
 
 class ProviderError(Exception):
     """Raised when an LLM provider request fails with a non-recoverable error."""
+
     pass
 
 
@@ -131,9 +133,7 @@ def get_waterfall_providers() -> list[tuple[str, str, str]]:
     gemini_key = keys["gemini"]
 
     groq_model = (
-        os.getenv("GROQ_MODEL", "").strip()
-        or os.getenv("LLM_MODEL", "").strip()
-        or DEFAULT_MODELS["groq"]
+        os.getenv("GROQ_MODEL", "").strip() or os.getenv("LLM_MODEL", "").strip() or DEFAULT_MODELS["groq"]
     )
     gemini_model = (
         os.getenv("GEMINI_MODEL", "").strip()
@@ -595,9 +595,8 @@ async def aget_flow_narrative(
         timeout=timeout,
     )
 
-    if (
-        narrative.get("summary") != FALLBACK_SUMMARY
-        and not str(narrative.get("provider", "")).startswith("failed:")
+    if narrative.get("summary") != FALLBACK_SUMMARY and not str(narrative.get("provider", "")).startswith(
+        "failed:"
     ):
         with _CACHE_LOCK:
             _NARRATIVE_CACHE[cache_key] = narrative
@@ -641,9 +640,8 @@ def get_flow_narrative(
         timeout=timeout,
     )
 
-    if (
-        narrative.get("summary") != FALLBACK_SUMMARY
-        and not str(narrative.get("provider", "")).startswith("failed:")
+    if narrative.get("summary") != FALLBACK_SUMMARY and not str(narrative.get("provider", "")).startswith(
+        "failed:"
     ):
         with _CACHE_LOCK:
             _NARRATIVE_CACHE[cache_key] = narrative
