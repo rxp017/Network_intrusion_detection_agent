@@ -4,7 +4,7 @@
 
 [![Verify NIDA](https://github.com/rxp017/Network_intrusion_detection_agent/actions/workflows/ci.yml/badge.svg)](https://github.com/rxp017/Network_intrusion_detection_agent/actions/workflows/ci.yml)
 
-[Three-minute demo script](docs/DEMO.md) · [Model card](docs/MODEL_CARD.md) · [Audit & verification](docs/AUDIT.md) · [Data provenance](docs/DATA_SOURCES.md)
+[Three-minute demo script](docs/DEMO.md) · [Screenshot walkthrough and judge answers](docs/JUDGE_WALKTHROUGH.md) · [Model card](docs/MODEL_CARD.md) · [Audit & verification](docs/AUDIT.md) · [Data provenance](docs/DATA_SOURCES.md)
 
 ---
 
@@ -18,7 +18,7 @@ Designed for visitors with no cybersecurity or machine learning background. The 
 ![NIDA Understand Mode](docs/images/understand_desktop.png)
 
 ### 2. "Technical" Mode (For Security Analysts, Reviewers, and Judges)
-Maintains the complete, rigorous analytical evidence dossier: 10-class probability distribution, per-flow TreeSHAP signed margin contributions, exact risk decomposition ($60 \times (1 - P(\text{Normal})) + 40 \times \text{anomaly\_pct}$), Isolation Forest cutoff, custom JSON flow workbench, and held-out benchmark evaluation with confusion matrix.
+Maintains the analytical evidence dossier: per-flow TreeSHAP signed margin contributions, risk decomposition ($60 \times (1 - P(\text{Normal})) + 40 \times \text{anomaly\_pct}$), Isolation Forest cutoff, custom JSON flow workbench, and held-out 10-class evaluation with confusion matrix.
 
 ![NIDA Technical Mode](docs/images/technical_desktop.png)
 
@@ -103,7 +103,7 @@ If you wish to enable live AI briefings via Groq or Google Gemini:
 ### Safe & Non-Blocking Design Guarantees
 - **Never committed to Git**: `.env` is listed in `.gitignore` (`.env`, `.env.*`). Never commit API keys.
 - **Credential Protection**: Gemini keys are passed strictly through the `x-goog-api-key` HTTP header, never in URL query strings (`?key=...`), preventing credential leakage in access logs or browser history.
-- **Zero Event-Loop Freezes**: LLM calls run asynchronously via `httpx.AsyncClient` with in-memory caching and a 2-second rate-limiter. Outbound calls never freeze the FastAPI event loop, and WebSocket replay streams continue uninterrupted.
+- **Async narration**: Optional LLM calls use `httpx.AsyncClient`, in-memory caching, and a 2-second rate limiter. Inference and replay use separate bounded paths; the browser tests verify the basic flow, not a production latency guarantee.
 - **Truthful Status Reporting**: The UI explicitly discloses the backend state: `"AI not configured"`, `"AI service unavailable"`, or `"AI explanation ready"`. If external providers fail or quota is exhausted, NIDA seamlessly displays the grounded rule-based explanation.
 
 ---

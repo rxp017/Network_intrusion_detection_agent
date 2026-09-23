@@ -37,7 +37,7 @@
    - Point out that **the currently inspected flow is seamlessly preserved across mode switches**.
 2. **Explore the Evidence Dossier**:
    - Point to the **Ground Truth Comparison** badge (`True class: Generic · Match ✓` or `Mismatch ⚠`).
-   - Show the **10-Class Probability Distribution** bar chart.
+   - Show the **Prediction mix** as browser-session counts. Use the held-out per-class table and confusion matrix for actual evaluation.
    - Show the **Risk Decomposition**:
      $$\text{Risk Score} = 60 \times (1 - P(\text{Normal})) + 40 \times \text{anomaly\_percentile}$$
      Emphasize that this is an operational triage heuristic, **not** a calibrated probability of real-world harm.
@@ -52,8 +52,8 @@
 1. Scroll to **Custom Flow Workbench**.
 2. Under **Load benchmark example**, select **Normal** and click **Load example**.
 3. Click **Analyze flow** to inspect the live scored output.
-4. Modify a feature value (e.g. increase `sbytes` from 146 to 50,000) and click **Analyze flow** again:
-   > *"This sensitivity experiment immediately shifts the TreeSHAP contributions and elevates the risk score, helping an analyst understand which features tip the model's decision boundary."*
+4. Modify one valid feature value, such as `sbytes`, and click **Analyze flow** again:
+   > *"This is a sensitivity experiment. Compare the verdict, risk score, and TreeSHAP contributions; the direction of change is not guaranteed."*
 5. Highlight strict schema validation:
    - Clear the textarea to `{}` or delete the `"service"` key, and click **Analyze flow**.
    - Show that the server returns an **HTTP 422 Unprocessable Entity** error with `Flow rejected`:
@@ -69,7 +69,7 @@
      > *"We practice intellectual honesty: Analysis has an 8.27% recall, Backdoor has a 9.26% recall, and Worms has only 44 test flows in UNSW-NB15. We explicitly warn the reviewer about these blind spots."*
    - Expand the **Confusion Matrix** showing true vs. predicted counts across all 10 classes.
 2. In the replay feed toolbar, filter by **Review queue only** and click **Export session ↓**:
-   - Open the downloaded JSON session file to show that it contains complete provenance: model ID, hashes, timestamps, scores, TreeSHAP evidence, and ground truth labels.
+   - Open the downloaded JSON session file to show browser-session totals and the latest 80 retained rows with model ID, replay timestamps, scores, TreeSHAP evidence, and benchmark labels. Artifact hashes are documented separately in `artifacts/manifest.json`.
 3. **Closing sentence**:
    > *"From raw 42-feature input to classification, anomaly detection, TreeSHAP evidence, and human review policy—NIDA keeps the entire investigation path inspectable, reproducible, and grounded in truth."*
 
@@ -84,10 +84,10 @@
 > **No.** The benign-only Isolation Forest flags statistical outliers that deviate from normal training traffic baselines. Statistical deviation is a lead for human review, not proof of an unobserved exploit.
 
 **Q: Why is multiclass accuracy 72.9% instead of 99%?**
-> Many academic papers claim 95–99% accuracy on UNSW-NB15 by testing on binary labels (attack vs. normal) or failing to remove duplicate and overlapping feature rows between training and test sets. NIDA eliminates feature overlap, evaluates a 10-class multiclass problem, and honestly reports weak classes (Analysis 8.3%, Backdoor 9.3%).
+> This is a 10-class task, not just attack versus Normal. NIDA removes feature-identical training rows that overlap the test set and reports the weak classes. Do not compare the number directly with a paper using a different split or evaluation protocol.
 
 **Q: Can NIDA block malicious IP addresses automatically?**
 > **No.** NIDA is intentionally designed for human decision support. Its operational review threshold recommends suspicious flows to human analysts; it never makes automated firewall or blocking decisions.
 
 **Q: Does the AI narrative layer send my network data to external cloud providers?**
-> **By default, no.** NIDA operates 100% offline with zero outbound network calls, providing built-in deterministic rule-based explanations. If an operator explicitly chooses to configure Groq or Gemini keys in their private `.env` file, only the 42-feature row and model verdict are sent over TLS for narrative generation. Keys are passed via secure HTTP headers and are never exposed to client browsers or access logs.
+> **By default, no.** NIDA's core demo works offline with a deterministic built-in explanation. If an operator configures Groq or Gemini and clicks the explanation button, the server sends a prompt containing the verdict, scores, review flag, and selected feature contributions to that provider. Keep API keys on the server; do not paste private data or keys into the workbench.
