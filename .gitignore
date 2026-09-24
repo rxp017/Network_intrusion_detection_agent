@@ -33,3 +33,6 @@ htmlcov/
 verification/*.log
 .verify-venv/
 .codex-remote-attachments/
+AUDIT_FINDINGS.txt
+NOTES_PRIVATE.md
+runtime/

@@ -3,9 +3,9 @@ setlocal
 cd /d "%~dp0"
 echo NIDA - local benchmark workspace
 if not exist ".venv\Scripts\python.exe" (
-  py -3.14 -m venv .venv
+  py -3.12 -m venv .venv
   if errorlevel 1 (
-    echo Install Python 3.14, then run this launcher again.
+    echo Install Python 3.12, or use the Docker commands in README.md.
     pause
     exit /b 1
   )

@@ -285,7 +285,7 @@ async def ws_stream(websocket: WebSocket):
                 message = await websocket.receive()
                 if message["type"] == "websocket.disconnect":
                     break
-        except WebSocketDisconnect, RuntimeError:
+        except (WebSocketDisconnect, RuntimeError):
             pass
         finally:
             disconnected.set()
@@ -320,7 +320,7 @@ async def ws_stream(websocket: WebSocket):
                 await asyncio.wait_for(disconnected.wait(), timeout=interval)
             except TimeoutError:
                 pass
-    except WebSocketDisconnect, OSError:
+    except (WebSocketDisconnect, OSError):
         pass
     except Exception:
         logger.exception("Replay stream failed")
