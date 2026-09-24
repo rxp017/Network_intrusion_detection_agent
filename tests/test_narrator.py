@@ -495,7 +495,42 @@ def test_predict_narrate_endpoint_when_available(client, flow, monkeypatch):
     data = response.json()
     assert data["narrative_status"] == "ok"
     assert data["narrative"]["summary"] == "Endpoint async narrative verified."
-    assert data["narrative"]["recommended_action"] == "Inspect endpoint logs."
+    assert data["narrative"]["recommended_action"] == data["recommended_action"]
+
+
+def test_explicit_llm_verdict_conflict_falls_back(client, flow, monkeypatch):
+    monkeypatch.setenv("GROQ_API_KEY", "gsk-mock")
+    monkeypatch.setenv("LLM_PROVIDER", "groq")
+    baseline = client.post("/predict", json=flow).json()
+    wrong_class = next(
+        category
+        for category in baseline["class_probabilities"]
+        if category != baseline["predicted_attack_cat"]
+    )
+    mock_resp = httpx.Response(
+        200,
+        json={
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(
+                            {
+                                "summary": f"This flow was classified as {wrong_class}.",
+                                "recommended_action": "Block the host immediately.",
+                            }
+                        )
+                    }
+                }
+            ]
+        },
+    )
+    with patch.object(httpx.AsyncClient, "post", AsyncMock(return_value=mock_resp)):
+        response = client.post("/predict?narrate=true", json=flow)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["narrative_status"] == "unavailable"
+    assert data["narrative"] is None
+    assert data["builtin_explanation"]["is_builtin"] is True
 
 
 def test_gemini_credentials_passed_in_header_not_url(monkeypatch):

@@ -4,11 +4,9 @@ Supports Groq and Gemini with automatic fallback on rate limits (429),
 zero-dependency .env auto-loading, in-memory caching, non-blocking async
 rate limiting, and literal grounding.
 
-CRITICAL CONCURRENCY PROPERTY:
-Outbound LLM HTTP requests are fully asynchronous using httpx.AsyncClient
-and asyncio.sleep. They NEVER block the FastAPI asyncio event loop or hold
-worker threads. Replay streams (/ws/stream) and REST endpoints continue ticking
-at full speed without any latency jitter or freezing while an explanation is generated.
+Outbound LLM requests use httpx.AsyncClient and asyncio.sleep so the request
+does not intentionally block the FastAPI event loop while waiting on a provider.
+Provider latency and shared server resources can still affect response times.
 """
 
 import asyncio
@@ -297,19 +295,21 @@ def generate_builtin_explanation(
         contrib = f.get("shap_contribution")
         if contrib is None:
             contrib = f.get("contribution", 0.0)
-        direction = "increasing" if contrib >= 0 else "reducing"
+        direction = "raises" if contrib >= 0 else "lowers"
         if isinstance(val, float):
             val_str = f"{val:.2f}"
         else:
             val_str = str(val)
-        feat_phrases.append(f"{name} ({val_str}, {direction} attack score by {abs(contrib):.2f})")
+        feat_phrases.append(
+            f"{name} ({val_str}, {direction} predicted-class model margin by {abs(contrib):.2f})"
+        )
 
-    features_text = ", ".join(feat_phrases) if feat_phrases else "standard session feature distributions"
+    features_text = ", ".join(feat_phrases) if feat_phrases else "no feature contribution list was available"
 
     if predicted_attack_cat == "Normal":
         summary = (
             f"Classified as Normal with {confidence:.1%} confidence and {risk_tier} risk ({risk_score}/100). "
-            f"Primary factors driving the baseline margin include {features_text}. "
+            f"Reported factors for the predicted-class margin: {features_text}. "
             f"{'Flagged for review due to anomalous baseline patterns.' if review_recommended else 'Traffic characteristics remain within expected baseline bounds.'}"
         )
         action = (
@@ -320,7 +320,7 @@ def generate_builtin_explanation(
     else:
         summary = (
             f"Classified as {predicted_attack_cat} attack with {confidence:.1%} confidence and {risk_tier} risk ({risk_score}/100). "
-            f"Key contributing factors driving the attack margin include {features_text}. "
+            f"Reported factors for the predicted-class margin: {features_text}. "
             f"{'Review is recommended under the operational threshold policy.' if review_recommended else 'Attack score is below the operational escalation threshold.'}"
         )
         action = (
@@ -335,6 +335,17 @@ def generate_builtin_explanation(
         "provider": "Built-in explanation (Rule-based)",
         "is_builtin": True,
     }
+
+
+def has_explicit_verdict_conflict(summary: str, expected: str, classes: list[str]) -> bool:
+    """Catch direct class contradictions; this is not full semantic validation."""
+    for category in classes:
+        if category == expected:
+            continue
+        pattern = rf"\b(?:classified|predicted|identified|labeled)\b(?:\s+\w+){{0,4}}\s+as\s+(?:an?\s+)?{re.escape(category)}\b"
+        if re.search(pattern, summary, flags=re.IGNORECASE):
+            return True
+    return False
 
 
 def get_builtin_explanation(scored_result: dict[str, Any]) -> dict[str, Any]:

@@ -1,6 +1,6 @@
 # Three-Minute Judging Demo: NIDA
 
-> **One-sentence summary for a beginner:** NIDA is an explainable decision-support dashboard that inspects network connection summaries from the UNSW-NB15 benchmark, classifies attack types with XGBoost, flags unusual traffic with Isolation Forest, and presents human-readable feature evidence so security analysts can triage alerts without guessing.
+> **One-sentence summary for a beginner:** NIDA helps an analyst decide which saved network connections deserve attention. On a held-out benchmark, its review queue cut false alarms from 33.4% of normal records to 4.5%, while still catching 89.4% of labelled attacks.
 
 ---
 
@@ -17,16 +17,16 @@
 ### 0:00–0:40 — "Understand" Mode & Project Framing
 
 1. **State the core problem**:
-   > *"In modern security operations, alerts without evidence create alert fatigue. NIDA demonstrates how to combine supervised attack classification, unsupervised anomaly detection, and exact feature attribution into an explainable triage interface."*
+   > *"Security teams cannot inspect every alert. NIDA puts fewer normal records in the review queue and shows the evidence behind each suggestion. The tradeoff is that the queue still misses about one in ten labelled attacks."*
 2. **Point to the persistent disclaimer banner**:
    > *"First, an honest research boundary: this is a benchmark replay of 400 held-out flows from UNSW-NB15. It is not capturing live packets, and statistical anomalies are not guaranteed zero-day exploits."*
 3. **Walk through Understand Mode (Default)**:
-   - Read the first-screen question, **Which connections deserve a closer look?**, and the record → model → human-review sequence.
+   - Point to **Fewer false alarms. A clearer next step.** Explain that 33.4% is the raw classifier's false-positive rate and 4.5% is the review queue's false-positive rate on the held-out test. The queue recall is 89.4%.
    - In **What happened in this record?**, click **Generic attack**. Show the recorded features, model verdict, review decision, and suggested human action.
-   - Note that the risk score is a triage signal, not proof of an attack. Switch to **Technical** for evaluation results and score breakdown.
+   - Note that the risk score is a triage signal, not proof of an attack. Scroll to **A proposed step. A human decision.** Approve a follow-up, add a short note, and open the session log. Explain that approval is browser-only and executes no containment.
    - Click **Generate explanation**:
      - *If offline (no API keys)*: Point to the badge `Built-in explanation (Rule-based)` and status `AI not configured`.
-     - *If API keys are configured in `.env`*: Point to `AI explanation ready`. The outbound LLM call does not stop the replay stream.
+     - *If API keys are configured in `.env`*: Point to `AI explanation ready`. Provider text is optional prose; the model verdict and action remain authoritative.
 
 ---
 
@@ -69,7 +69,7 @@
      > *"We practice intellectual honesty: Analysis has an 8.27% recall, Backdoor has a 9.26% recall, and Worms has only 44 test flows in UNSW-NB15. We explicitly warn the reviewer about these blind spots."*
    - Expand the **Confusion Matrix** showing true vs. predicted counts across all 10 classes.
 2. In the replay feed toolbar, filter by **Review queue only** and click **Export session ↓**:
-   - Open the downloaded JSON session file to show browser-session totals and the latest 80 retained rows with model ID, replay timestamps, scores, TreeSHAP evidence, and benchmark labels. Artifact hashes are documented separately in `artifacts/manifest.json`.
+   - Open the JSON file to show browser-session totals, latest 80 retained rows, and `analyst_decisions` including the note and `execution: "none"`. It does not contain the entire test set.
 3. **Closing sentence**:
    > *"From raw 42-feature input to classification, anomaly detection, TreeSHAP evidence, and human review policy—NIDA keeps the entire investigation path inspectable, reproducible, and grounded in truth."*
 
@@ -84,10 +84,19 @@
 > **No.** The benign-only Isolation Forest flags statistical outliers that deviate from normal training traffic baselines. Statistical deviation is a lead for human review, not proof of an unobserved exploit.
 
 **Q: Why is multiclass accuracy 72.9% instead of 99%?**
-> This is a 10-class task, not just attack versus Normal. NIDA removes feature-identical training rows that overlap the test set and reports the weak classes. Do not compare the number directly with a paper using a different split or evaluation protocol.
+> This is a 10-class task, not just attack versus Normal. Rare or overlapping attack categories are hard to separate: Analysis recall is 8.27% and Backdoor recall is 9.26%. NIDA removes feature-identical training rows that overlap the test set and reports the weak classes. The review queue's binary recall is a different measure from 10-class accuracy.
 
 **Q: Can NIDA block malicious IP addresses automatically?**
-> **No.** NIDA is intentionally designed for human decision support. Its operational review threshold recommends suspicious flows to human analysts; it never makes automated firewall or blocking decisions.
+> **No.** An analyst can record approval or dismissal of a proposed follow-up in this browser session. That approval is a demonstration record, not a firewall command or durable incident ticket. The saved benchmark rows do not provide a live enforcement target.
+
+**Q: Why 60/40 in the risk score?**
+> The 60/40 blend is a heuristic that gives more weight to the classifier's non-Normal score and still reflects anomaly rank. It was not derived from costs of real incidents and is not a calibrated chance of harm. Queue membership comes from a separate validation-derived threshold.
+
+**Q: What would improve Backdoor recall?**
+> First inspect Backdoor mistakes and label quality, then compare class-aware training or additional discriminative flow features. Choose changes on validation data and report the full held-out tradeoff: other classes, false alarms, queue recall, and calibration. Do not claim an improvement before measuring it.
+
+**Q: What if an AI explanation disagrees with the model?**
+> The classifier verdict, review flag, risk, and deterministic follow-up remain authoritative. The server rejects direct class contradictions it recognizes and falls back to the built-in explanation. The guard cannot understand every possible wording, so a person should compare the prose with the displayed evidence.
 
 **Q: Does the AI narrative layer send my network data to external cloud providers?**
 > **By default, no.** NIDA's core demo works offline with a deterministic built-in explanation. If an operator configures Groq or Gemini and clicks the explanation button, the server sends a prompt containing the verdict, scores, review flag, and selected feature contributions to that provider. Keep API keys on the server; do not paste private data or keys into the workbench.

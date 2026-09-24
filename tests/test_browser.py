@@ -150,7 +150,9 @@ def test_first_time_visitor_and_understand_journey(browser_page):
     expect(page.locator("#view-understand")).to_be_visible()
     expect(page.locator("#view-technical")).to_be_hidden()
 
-    expect(page.locator("#understand-hero-title")).to_have_text("Which connections deserve a closer look?")
+    expect(page.locator("#understand-hero-title")).to_have_text("Fewer false alarms. A clearer next step.")
+    expect(page.locator("#hero-raw-fpr")).to_have_text("33.4%")
+    expect(page.locator("#hero-queue-fpr")).to_have_text("4.5%")
     expect(page.locator(".understand-hero")).to_contain_text("human")
     expect(page.locator("#loading-screen")).to_be_hidden(timeout=12000)
 
@@ -175,6 +177,26 @@ def test_first_time_visitor_and_understand_journey(browser_page):
     expect(page.locator(".glossary-card")).to_contain_text("Connection record")
     expect(page.locator(".glossary-card")).to_contain_text("Review recommended")
     expect(page.locator(".glossary-card")).to_contain_text("Anomaly candidate")
+    assert not errors
+
+
+def test_analyst_decision_is_logged_without_execution(browser_page):
+    page, errors, url = browser_page
+    page.goto(url)
+    page.locator("#archetype-generic").click()
+    expect(page.locator("#decision-proposal")).not_to_have_text("Choose a connection to review.")
+    page.locator("#decision-note").fill("Verify with host logs")
+    page.locator("#decision-approve").click()
+    expect(page.locator("#decision-status")).to_contain_text("Follow-up approved")
+    expect(page.locator("#decision-status")).to_contain_text("No action executed")
+    with page.expect_download() as download:
+        page.locator("#export").click()
+    exported = json.loads(download.value.path().read_text())
+    assert exported["analyst_decisions"][-1]["decision"] == "approved_for_follow_up"
+    assert exported["analyst_decisions"][-1]["analyst_note"] == "Verify with host logs"
+    assert exported["analyst_decisions"][-1]["execution"] == "none"
+    page.reload()
+    expect(page.locator("#decision-count")).to_have_text("(1)")
     assert not errors
 
 

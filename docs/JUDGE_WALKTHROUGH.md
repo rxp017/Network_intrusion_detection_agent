@@ -1,6 +1,6 @@
 # NIDA: screenshot walkthrough and judge answers
 
-**Say this first:** “NIDA is a research demo that replays saved network-connection summaries. It uses a classifier to suggest a traffic category, an anomaly detector to spot unusual Normal-looking records, and a separate policy to queue some records for human review. It shows the evidence behind each result. It does not monitor or block a live network.”
+**Say this first:** “Security analysts cannot inspect every alert. NIDA uses saved benchmark records to form a smaller, explainable review queue. On 82,332 held-out records, the raw classifier flagged 33.4% of Normal rows; the queue flagged 4.5% and caught 89.4% of labelled attacks. It is a research replay, not live protection.”
 
 ## Before clicking
 
@@ -22,9 +22,9 @@ Read the screenshot from top to bottom:
 | **Light/dark button** | A display preference saved in this browser; it does not change inference. |
 | **Benchmark replay / connection status / UTC clock** | These tell you this is a local replay, whether the stream is running, and the current UTC time. “Replay paused” means no new rows are being streamed. The displayed row time is when it was replayed, not the original network capture time. |
 | **Research boundary notice and model ID** | The 400 rows are saved UNSW-NB15 benchmark records. The model ID identifies the loaded artifact bundle. NIDA does not watch this computer’s traffic or block connections. “Audit evaluation” jumps to the measured results. |
-| **“Which connections deserve a closer look?”** | The actual problem: large numbers of records need triage, and a human needs a reason to inspect one. NIDA helps prioritize and explain; it does not decide guilt. |
-| **Record → model → human review** | A record holds measured features such as protocol, service, duration and bytes. Two models score it. A review policy may queue it. A person verifies context and decides what to do. |
-| **See a connection / See the technical evidence** | The first button moves to the selected-record explanation. The second changes to Technical mode. |
+| **“Fewer false alarms. A clearer next step.”** | This is the outcome: a smaller review queue with an explicit missed-attack tradeoff. The 33.4% and 4.5% numbers are false-positive rates among Normal test rows, not percentages of all alerts. |
+| **89.4% recall / 96.0% precision** | The queue catches about 89 in 100 labelled attacks in the test split. About 96 in 100 queued rows have attack labels in this split. Real traffic can have a different mix. |
+| **Inspect a decision / See measured evidence** | The first button moves to a selected-record explanation. The second opens Technical mode. |
 | **Normal / Generic attack / Reconnaissance** | Example selectors. These are benchmark class names, not buttons that generate network attacks. A category is the dataset’s label; the model can disagree with it. |
 | **Selected record and ID** | One replay item or manually scored sample. The numeric ID identifies a benchmark row; the suffix identifies its replay cycle. It is not an IP address or incident number. |
 | **Verdict and risk badge** | Verdict is the classifier’s predicted category. Risk is a 0–100 *heuristic priority score*, not a 100% chance of an attack. The badge’s low/medium/high/critical tier is a display bucket. |
@@ -47,6 +47,7 @@ Read the screenshot from top to bottom:
 - **Rate** changes the interval between records: Slow 1.5 seconds, Normal 0.6 seconds, Fast 0.15 seconds.
 - **Search** filters the retained rows by predicted class, protocol, service, true label, or record ID. **Risk filter** can show all, review-queue only, score ≥50, or score ≥75. These filters change what is visible in the browser; they do not retrain the model.
 - **Export session** downloads `nida-session.json` with the browser session totals, predicted-class counts, and latest 80 retained rows. Those rows include model outputs, evidence, replay timestamps, and dataset labels. It does **not** export all 82,332 test rows or artifact-file hashes.
+- The **human decision demo** records an approved follow-up or dismissal, optional note, timestamp, model ID, and `execution: "none"` in `analyst_decisions` in the session export. It stores at most 100 decisions in this browser session. It does not call an enforcement API or save a server-side incident.
 - **Flow/Time** is the replay ID and replay time. **Verdict** is model output. **Protocol/Service** are input features. **Decision** says Review queue or Routine. **Risk** is the heuristic score/tier. **Ground truth** is the benchmark label used to check correctness.
 - Click a row, or focus it and press Enter/Space, to inspect it. A highlighted row is selected. “Latest 80 retained” limits browser memory; counters can include more rows and repeated cycles.
 - On a phone, the wide table scrolls sideways to preserve all columns; the rest of the page stays within the screen.
@@ -98,9 +99,9 @@ These values are from [the saved evaluation](../artifacts/evaluation.json) and t
 
 ## A safe three-minute click path
 
-1. **Start in Understand.** Say the one-sentence pitch. Point to “benchmark replay” and say what the system does *not* do.
+1. **Start in Understand.** Say the one-sentence pitch. Point to the 33.4% → 4.5% false-positive comparison and 89.4% queue recall. State the benchmark replay boundary.
 2. **Choose Generic attack.** Read the selected record’s verdict, observed features, review decision and human action. Do not assume every example predicts its ground-truth class correctly.
-3. **Click Generate explanation.** With no API key, say “This is the built-in rule-based explanation; external AI is optional.” Do not call it a live AI answer.
+3. **Scroll to the human decision demo.** Approve a follow-up, add a note, and show the session log. Say clearly that no containment is executed. Click Generate explanation if asked; with no API key, it uses the built-in rule-based explanation.
 4. **Click Technical.** Show that the selected record stays selected. Explain risk as priority, confidence as an uncalibrated model score, and the ground-truth comparison as the benchmark check.
 5. **Scroll to TreeSHAP and Evidence before confidence.** Point to one positive/negative contribution, then 72.89% accuracy and the weak classes. End with “a person still decides what to investigate.”
 6. **If time remains:** load a benchmark example into the JSON workbench, click Analyze flow, then remove a required field to show validation. Avoid predicting how any one edited feature will change the result.
@@ -110,6 +111,14 @@ These values are from [the saved evaluation](../artifacts/evaluation.json) and t
 **Is it live traffic?** No. It replays precomputed UNSW-NB15 feature rows. There is no packet sniffer or network adapter.
 
 **Why 400 here and 82,332 in the metrics?** The 400 rows make every class visible in a balanced demo. The 82,332 held-out rows are the evaluation set. Never use the 400-row screen to claim accuracy.
+
+**Why is accuracy only 72.89%?** It must choose among 10 categories. Analysis and Backdoor recall are below 10%, which lowers class-balanced performance. Binary queue recall answers a different question from exact-category accuracy.
+
+**Why are the risk weights 60/40?** They are an explicit heuristic prioritizing the classifier's non-Normal score while including anomaly rank. They were not fit to real incident costs and are not a probability of harm. Queue membership uses a separate threshold.
+
+**How would you lift Backdoor recall?** Inspect the mistakes and label quality, test class-aware training or useful new flow features on validation data, then report held-out effects on all classes and false alarms. No improvement is claimed yet.
+
+**What if the AI prose disagrees with the model?** The model's verdict and deterministic follow-up control the display. Direct wrong-class claims detected by the server trigger the built-in explanation. Other wording may still be wrong, so the analyst checks the evidence.
 
 **What is a flow?** One summarized network conversation represented by 42 model input features, not a full packet recording.
 

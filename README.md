@@ -1,6 +1,6 @@
 # NIDA — Network Intrusion Detection Agent
 
-> **One-sentence summary:** NIDA is an explainable decision-support dashboard that inspects network connection summaries from the UNSW-NB15 benchmark, classifies attack types with XGBoost, flags unusual traffic with Isolation Forest, and presents human-readable feature evidence so security analysts can triage alerts without guessing.
+> **One-sentence summary:** NIDA turns saved network connection records into a smaller, explainable review queue. On 82,332 held-out UNSW-NB15 records, its queue reduced the false-positive rate from 33.41% for raw classifier alerts to 4.52%, while retaining 89.42% attack recall. This is a benchmark replay, not live network protection.
 
 [![Verify NIDA](https://github.com/rxp017/Network_intrusion_detection_agent/actions/workflows/ci.yml/badge.svg)](https://github.com/rxp017/Network_intrusion_detection_agent/actions/workflows/ci.yml)
 
@@ -13,12 +13,14 @@
 NIDA offers two genuinely different presentation modes sharing the identical scoring engine, 400-flow replay stream, and REST/WebSocket API:
 
 ### 1. "Understand" Mode (Default for Non-Technical Visitors)
-Designed for visitors with no cybersecurity or machine learning background. The opening screen states the purpose and shows the record → model → human-review path. A selected example shows the verdict and next step; key terms are available in a collapsible glossary.
+Designed for visitors with no cybersecurity or machine learning background. The opening screen leads with the measured alert-fatigue result and states the missed-attack tradeoff. A selected example shows the verdict and next step; key terms are available in a collapsible glossary.
 
 ![NIDA Understand Mode](docs/images/understand_desktop.png)
 
 ### 2. "Technical" Mode (For Security Analysts, Reviewers, and Judges)
 Maintains the analytical evidence dossier: per-flow TreeSHAP signed margin contributions, risk decomposition ($60 \times (1 - P(\text{Normal})) + 40 \times \text{anomaly\_pct}$), Isolation Forest cutoff, custom JSON flow workbench, and held-out 10-class evaluation with confusion matrix.
+
+Both modes show a **human decision demo**: the analyst can approve a proposed follow-up or dismiss it, add a note, and export the session log. The decision log is kept only in this browser session. Approval does not contact a firewall, save a server-side incident, or change traffic.
 
 ![NIDA Technical Mode](docs/images/technical_desktop.png)
 
@@ -35,6 +37,7 @@ To avoid common machine learning and security hype, NIDA's research boundaries a
 | **Novelty / Anomaly Detection** | **YES** | Benign-only Isolation Forest trained exclusively on clean validation normals. |
 | **Per-Flow TreeSHAP Evidence** | **YES** | Fast, exact TreeSHAP signed feature contributions explaining predicted class margin. |
 | **Selective Human Review Policy** | **YES** | Validation-derived 94.19% threshold isolates high-risk traffic, cutting false positives to 4.5%. |
+| **Analyst Approval Demo** | **YES** | Records follow-up approval/dismissal and optional note in browser session/export; executes no containment. |
 | **100% Offline Local Operation** | **YES** | Zero external fonts, CDNs, databases, or API keys required to run the workspace. |
 | **Capture Live Network Packets** | ❌ **NO** | NIDA does not capture live packets (no `libpcap`, `scapy`, or raw network interface drivers). |
 | **Discover Network Devices** | ❌ **NO** | NIDA does not discover network topology, hosts, or device configurations. |
@@ -70,6 +73,16 @@ Open **[http://127.0.0.1:8000](http://127.0.0.1:8000)** in any modern browser.
 - Switching between **Understand** and **Technical** modes preserves your selected flow.
 - The opening view explains the project in one screen; the theme button switches between light and dark and remembers your choice.
 - Replay controls let you pause, resume, adjust speed (0.15s to 1.5s), and filter by scenario or risk level.
+- The analyst decision demo can record a proposed follow-up, dismissal, and note for the selected record. Export the session to inspect the log.
+
+If Python 3.14 is unavailable but Docker is installed, run the pinned container:
+
+```bash
+docker build -t nida .
+docker run --rm -p 127.0.0.1:8000:8000 nida
+```
+
+Then open the same local URL. The CI container job builds the image and checks `/health`; local Docker was unavailable during this review.
 
 ---
 
@@ -105,6 +118,7 @@ If you wish to enable live AI briefings via Groq or Google Gemini:
 - **Credential Protection**: Gemini keys are passed strictly through the `x-goog-api-key` HTTP header, never in URL query strings (`?key=...`), preventing credential leakage in access logs or browser history.
 - **Async narration**: Optional LLM calls use `httpx.AsyncClient`, in-memory caching, and a 2-second rate limiter. Inference and replay use separate bounded paths; the browser tests verify the basic flow, not a production latency guarantee.
 - **Truthful Status Reporting**: The UI explicitly discloses the backend state: `"AI not configured"`, `"AI service unavailable"`, or `"AI explanation ready"`. If external providers fail or quota is exhausted, NIDA seamlessly displays the grounded rule-based explanation.
+- **Model authority**: Provider prose cannot replace the model-derived recommended action. Direct class contradictions in provider text are rejected and the built-in explanation is used. Free-form prose cannot be fully verified automatically, so analysts must check it against the displayed evidence.
 
 ---
 
@@ -143,10 +157,10 @@ ruff format --check .
 node --check static/dashboard.js
 node --check static/boot.js
 
-# 4. Pytest unit & integration test suite (62 tests)
+# 4. Pytest unit & integration test suite (63 tests)
 python -m pytest -m "not browser" -q
 
-# 5. Playwright Chromium browser tests (7 end-to-end journey tests)
+# 5. Playwright Chromium browser tests (8 end-to-end journey tests)
 python -m playwright install chromium
 # PowerShell:
 $env:NIDA_BROWSER_TESTS = "1"
@@ -158,7 +172,7 @@ python -m pytest -m browser -v
 git diff --check
 ```
 
-CI runs these exact checks on Linux via `.github/workflows/ci.yml`.
+CI runs these checks on Linux and builds/starts the Docker image via `.github/workflows/ci.yml`. Local Docker was unavailable for this review; the container job is the startup check.
 
 ---
 

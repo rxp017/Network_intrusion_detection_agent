@@ -9,6 +9,20 @@ const element = (tag, text, className) => {
 };
 const percent = (v) => (v * 100).toFixed(1) + "%";
 const number = (v) => Number(v).toLocaleString();
+const reducedMotion = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+function loadDecisionLog() {
+  try {
+    const saved = JSON.parse(sessionStorage.getItem("nida_decisions") || "[]");
+    return Array.isArray(saved)
+      ? saved.filter((entry) => entry && typeof entry.flow_id === "string" &&
+          typeof entry.recorded_at === "string" &&
+          ["approved_for_follow_up", "dismissed"].includes(entry.decision)).slice(-100)
+      : [];
+  } catch (_) {
+    return [];
+  }
+}
 
 const state = {
   socket: null,
@@ -21,6 +35,7 @@ const state = {
   rows: [],
   history: [],
   selected: null,
+  decisionLog: loadDecisionLog(),
   offset: 0,
   presentationMode: (() => {
     try { return localStorage.getItem("nida_mode") || "understand"; }
@@ -315,6 +330,48 @@ function selectFlow(row) {
   updateGuidedWalkthrough(row);
   inspect(row);
   renderRows();
+  renderDecisionDesk();
+}
+
+function renderDecisionDesk() {
+  const row = state.selected;
+  $("decision-approve").disabled = !row;
+  $("decision-dismiss").disabled = !row;
+  $("decision-proposal").textContent = row?.recommended_action || "Choose a connection to review.";
+  $("decision-reason").textContent = row
+    ? `${row.event_id || "Custom record"} · ${row.predicted_attack_cat || "Unknown"} · risk ${row.risk_score ?? "—"}/100 · ${row.review_recommended ? "queued for review" : "below review threshold"}. Model output is a lead, not proof.`
+    : "The model evidence and review policy provide context.";
+  const recent = row && [...state.decisionLog].reverse().find((entry) => entry.flow_id === (row.event_id || "custom-flow"));
+  $("decision-status").textContent = recent
+    ? `${recent.decision === "approved_for_follow_up" ? "Follow-up approved" : "Dismissed"} for this record at ${recent.recorded_at.slice(11, 19)} UTC. No action executed.`
+    : "No decision recorded for this record.";
+  $("decision-count").textContent = `(${state.decisionLog.length})`;
+  const items = state.decisionLog.slice(-5).reverse().map((entry) =>
+    element("li", `${entry.flow_id}: ${entry.decision === "approved_for_follow_up" ? "follow-up approved" : "dismissed"} · ${entry.recorded_at.slice(11, 19)} UTC${entry.analyst_note ? ` · ${entry.analyst_note}` : ""}`),
+  );
+  $("decision-log").replaceChildren(...items);
+}
+
+function recordDecision(decision) {
+  const row = state.selected;
+  if (!row) return;
+  state.decisionLog.push({
+    recorded_at: new Date().toISOString(),
+    flow_id: row.event_id || "custom-flow",
+    model_id: row.model_id || $("model-id").textContent,
+    predicted_attack_cat: row.predicted_attack_cat,
+    risk_score: row.risk_score,
+    review_recommended: row.review_recommended,
+    proposed_action: row.recommended_action,
+    decision,
+    analyst_note: $("decision-note").value.trim(),
+    execution: "none",
+  });
+  state.decisionLog = state.decisionLog.slice(-100);
+  try { sessionStorage.setItem("nida_decisions", JSON.stringify(state.decisionLog)); }
+  catch (_) { /* Export remains available when storage is blocked. */ }
+  $("decision-note").value = "";
+  renderDecisionDesk();
 }
 
 function updateGuidedWalkthrough(row) {
@@ -391,9 +448,8 @@ function renderNarrative(narrative) {
     $("briefing-provider-badge").textContent = isBuiltin
       ? "Built-in explanation (Rule-based)"
       : narrative.provider;
-    if (narrative.recommended_action) {
-      $("briefing-action-text").textContent = narrative.recommended_action;
-    }
+    // Provider prose cannot replace the model's deterministic follow-up action.
+    $("briefing-action-text").textContent = state.selected?.recommended_action || "Review the record and its evidence.";
   }
 
   // Analyst / Technical Card
@@ -457,6 +513,8 @@ async function requestNarrative() {
       body: JSON.stringify(payload),
     });
 
+    if (state.selected !== row) return;
+
     if (data.narrative && data.narrative_status === "ok") {
       row._narrative = data.narrative;
       statusBriefing.textContent = "AI explanation ready";
@@ -480,11 +538,13 @@ async function requestNarrative() {
       statusBriefing.textContent = "AI service unavailable";
       if (statusAnalyst) statusAnalyst.textContent = "AI service unavailable";
     }
-    renderNarrative(row._narrative);
+    if (state.selected === row) renderNarrative(row._narrative);
   } catch (err) {
-    statusBriefing.textContent = "Could not analyze this flow";
-    if (statusAnalyst) statusAnalyst.textContent = "Could not analyze this flow";
-    if (row.builtin_explanation) {
+    if (state.selected === row) {
+      statusBriefing.textContent = "Could not analyze this flow";
+      if (statusAnalyst) statusAnalyst.textContent = "Could not analyze this flow";
+    }
+    if (row.builtin_explanation && state.selected === row) {
       renderNarrative(row.builtin_explanation);
     }
   } finally {
@@ -590,8 +650,10 @@ $("mode-understand-btn").onclick = () => setPresentationMode("understand");
 $("mode-technical-btn").onclick = () => setPresentationMode("technical");
 $("hero-technical-btn").onclick = () => {
   setPresentationMode("technical");
-  $("view-technical").scrollIntoView({ behavior: "smooth" });
+  $("view-technical").scrollIntoView({ behavior: reducedMotion() ? "auto" : "smooth" });
 };
+$("decision-approve").onclick = () => recordDecision("approved_for_follow_up");
+$("decision-dismiss").onclick = () => recordDecision("dismissed");
 $("theme-toggle").onclick = () => setTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark");
 
 // Guided Archetype buttons
@@ -654,6 +716,7 @@ $("export").onclick = () => {
     },
     predictions: state.counts,
     retained_flows: state.rows,
+    analyst_decisions: state.decisionLog,
   };
   const url = URL.createObjectURL(
     new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" }),
@@ -714,6 +777,12 @@ $("score").onclick = async () => {
 };
 
 function renderMetrics(metrics) {
+  $("hero-raw-fpr").textContent = percent(metrics.binary_detection.false_positive_rate);
+  $("hero-queue-fpr").textContent = percent(metrics.review_policy.test_false_positive_rate);
+  $("hero-mobile-raw").textContent = percent(metrics.binary_detection.false_positive_rate);
+  $("hero-mobile-fpr").textContent = percent(metrics.review_policy.test_false_positive_rate);
+  $("hero-recall").textContent = percent(metrics.review_policy.test_recall);
+  $("hero-precision").textContent = percent(metrics.review_policy.test_precision);
   $("eval-accuracy").textContent = percent(metrics.accuracy);
   $("eval-f1").textContent = metrics.macro_f1.toFixed(3);
   $("eval-recall").textContent = percent(metrics.binary_detection.recall);
@@ -765,8 +834,31 @@ function renderMetrics(metrics) {
   $("confusion").replaceChildren(table);
 }
 
+function initScrollReveals() {
+  if (reducedMotion() || !('IntersectionObserver' in window)) return;
+  const targets = document.querySelectorAll(
+    ".guided-section, .feed-panel, .decision-desk, .metrics-grid, .activity-panel, .inspector-dossier, .distribution-panel, .input-panel, .evidence-panel",
+  );
+  const observer = new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      if (entry.isIntersecting) {
+        entry.target.classList.remove("reveal-pending");
+        entry.target.classList.add("reveal-visible");
+        observer.unobserve(entry.target);
+      }
+    }
+  }, { threshold: 0.08 });
+  for (const target of targets) {
+    target.classList.add("reveal-pending");
+    observer.observe(target);
+  }
+  document.documentElement.classList.add("motion-ready");
+}
+
 async function init() {
   setTheme(document.documentElement.dataset.theme);
+  renderDecisionDesk();
+  initScrollReveals();
   const tick = () => {
     $("clock").textContent = new Date().toISOString().slice(11, 19) + " UTC";
   };

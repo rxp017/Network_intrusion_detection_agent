@@ -190,8 +190,17 @@ async def predict(payload: dict = Body(...), explain: bool = Query(True), narrat
                         and narrative.get("provider") != "none"
                         and not str(narrative.get("provider", "")).startswith("failed:")
                         and narrative.get("summary") != llm_narrator.FALLBACK_SUMMARY
+                        and not llm_narrator.has_explicit_verdict_conflict(
+                            str(narrative.get("summary", "")),
+                            result["predicted_attack_cat"],
+                            bundle().classes,
+                        )
                     ):
-                        result["narrative"] = narrative
+                        # The provider writes prose; model evidence controls the action.
+                        result["narrative"] = {
+                            **narrative,
+                            "recommended_action": result["recommended_action"],
+                        }
                         result["narrative_status"] = "ok"
                     else:
                         result["narrative"] = None

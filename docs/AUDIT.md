@@ -1,5 +1,15 @@
 # Audit and verification — 15 September 2026
 
+## Judge-feedback update — 24 September 2026
+
+- The landing screen now leads with the held-out review queue outcome: raw classifier false-positive rate 33.41% versus queue false-positive rate 4.52%, with 89.42% queue recall. It also states the missed-attack cost and benchmark-replay boundary.
+- Both modes now show a proposed follow-up, analyst approval/dismissal, optional note, and session export. Decisions use browser session storage only and always record `execution: "none"`; this is not live containment or a durable incident audit.
+- The optional LLM cannot replace the model-derived follow-up. Direct wrong-class claims are rejected in favor of the built-in explanation. The guard is deliberately narrow; analysts must still compare prose with evidence.
+- Built-in TreeSHAP wording now names the predicted-class model margin, not an attack score. The Docker image now includes the narrator module and its `httpx` runtime dependency, and CI has a container startup smoke test.
+- Local verification: 63 non-browser tests, 8 Chromium browser tests, Ruff lint/format, JavaScript syntax, dependency integrity, and whitespace checks passed. Desktop and mobile screenshots were visually reviewed. Docker was unavailable locally; container status requires the new CI job.
+
+The original audit evidence below is retained as a dated record of the earlier baseline.
+
 ## Fixed
 
 | Original issue | Change |

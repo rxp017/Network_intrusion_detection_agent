@@ -32,3 +32,4 @@ htmlcov/
 !.env.example
 verification/*.log
 .verify-venv/
+.codex-remote-attachments/

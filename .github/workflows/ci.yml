@@ -24,3 +24,21 @@ jobs:
       - run: python -m pytest -m browser -q
         env:
           NIDA_BROWSER_TESTS: '1'
+  container:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t nida:ci .
+      - name: Smoke-test container startup
+        run: |
+          docker run --detach --name nida-ci --publish 127.0.0.1:18000:8000 --env LLM_PROVIDER=none nida:ci
+          trap 'docker logs nida-ci; docker stop nida-ci' EXIT
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:18000/health > health.json; then
+              python -c "import json; data=json.load(open('health.json')); assert data['status']=='ok' and data['replay_available'] is True"
+              exit 0
+            fi
+            sleep 2
+          done
+          exit 1

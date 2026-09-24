@@ -7,6 +7,7 @@ cloudpickle==3.1.2
 colorama==0.4.6
 fastapi==0.141.1
 h11==0.16.0
+httpx==0.28.1
 idna==3.19
 joblib==1.6.0
 narwhals==2.26.0

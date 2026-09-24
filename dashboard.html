@@ -99,21 +99,28 @@
       <section id="view-understand" class="presentation-view" role="tabpanel" aria-labelledby="mode-understand-btn">
         <section class="understand-hero" aria-labelledby="understand-hero-title">
           <div class="hero-main">
-            <span class="eyebrow">NIDA / NETWORK INTRUSION DETECTION AGENT</span>
-            <h1 id="understand-hero-title">Which connections deserve a closer look?</h1>
-            <p class="hero-desc">NIDA checks recorded network connections for attack patterns and unusual behavior, then shows which ones a person should review.</p>
+            <span class="eyebrow">NIDA / EXPLAINABLE REVIEW QUEUE</span>
+            <h1 id="understand-hero-title">Fewer false alarms. A clearer next step.</h1>
+            <p class="hero-desc">Security analysts cannot investigate every alert. NIDA turns saved connection records into a smaller review queue and shows the reason behind each recommendation.</p>
+            <p class="hero-mobile-outcome"><strong id="hero-mobile-fpr">—</strong><span>Normal records queued, down from <b id="hero-mobile-raw">—</b> raw</span></p>
             <div class="hero-actions">
-              <a class="button primary" href="#guided-title">See a connection <span aria-hidden="true">↘</span></a>
-              <button id="hero-technical-btn" class="button secondary" type="button">See the technical evidence <span aria-hidden="true">→</span></button>
+              <a class="button primary" href="#guided-title">Inspect a decision <span aria-hidden="true">↘</span></a>
+              <button id="hero-technical-btn" class="button secondary" type="button">See measured evidence <span aria-hidden="true">→</span></button>
             </div>
-            <p class="hero-footnote">A research demo using 400 benchmark records. No live network access or automatic blocking.</p>
+            <p class="hero-footnote">Research prototype · 400-record replay · No live monitoring or automatic blocking</p>
           </div>
-          <div class="hero-process" aria-label="How NIDA works">
-            <div class="process-heading"><span>THE IDEA, IN THREE MOVES</span><span>01 — 03</span></div>
-            <div class="process-row"><b>01</b><span>Read a connection record</span><small>Protocol, bytes, duration, and other measured features</small></div>
-            <div class="process-row"><b>02</b><span>Score the pattern</span><small>Attack classifier + anomaly detector</small></div>
-            <div class="process-row"><b>03</b><span>Hand off the evidence</span><small>A human decides what happens next</small></div>
-            <div class="process-end">RECORD <span>→</span> MODEL <span>→</span> HUMAN REVIEW</div>
+          <div class="hero-outcome" aria-label="Measured review policy outcome">
+            <div class="outcome-heading"><span>WHAT CHANGED</span><span>HELD-OUT TEST</span></div>
+            <div class="outcome-comparison">
+              <div class="outcome-number"><span>Raw classifier</span><strong id="hero-raw-fpr">—</strong><small>Normal records flagged</small></div>
+              <span class="outcome-arrow" aria-hidden="true">→</span>
+              <div class="outcome-number outcome-after"><span>Review queue</span><strong id="hero-queue-fpr">—</strong><small>Normal records queued</small></div>
+            </div>
+            <div class="outcome-support">
+              <div><strong id="hero-recall">—</strong><span>Attack recall in queue</span></div>
+              <div><strong id="hero-precision">—</strong><span>Queue precision</span></div>
+            </div>
+            <p class="outcome-note">Measured on 82,332 held-out records. The queue still misses about 1 in 10 labelled attacks. A human must check the evidence.</p>
           </div>
         </section>
 
@@ -255,6 +262,35 @@
           <span id="visible-count">0 visible flows</span>
           <span>Latest 80 retained · Click or press Enter to inspect</span>
         </div>
+      </section>
+
+      <section id="decision-desk" class="panel decision-desk" aria-labelledby="decision-desk-title">
+        <div class="decision-intro">
+          <span class="eyebrow">HUMAN-IN-THE-LOOP DEMO</span>
+          <h2 id="decision-desk-title">A proposed step. A human decision.</h2>
+          <p>NIDA proposes an investigation step for the selected record. An analyst can record a decision before anything happens.</p>
+        </div>
+        <div class="decision-workspace">
+          <div class="decision-proposal">
+            <span class="field-label">PROPOSED FOLLOW-UP</span>
+            <p id="decision-proposal">Choose a connection to review.</p>
+            <small id="decision-reason">The model evidence and review policy provide context.</small>
+          </div>
+          <div class="decision-inputs">
+            <label for="decision-note">Analyst note <span>(optional)</span></label>
+            <input id="decision-note" type="text" maxlength="240" placeholder="Why approve or dismiss?" />
+            <div class="decision-buttons">
+              <button id="decision-approve" class="button primary" type="button" disabled>Approve follow-up</button>
+              <button id="decision-dismiss" class="button secondary" type="button" disabled>Dismiss</button>
+            </div>
+            <p id="decision-status" role="status" aria-live="polite">No decision recorded for this record.</p>
+          </div>
+        </div>
+        <details class="decision-history">
+          <summary>Session decision log <span id="decision-count">(0)</span></summary>
+          <ol id="decision-log"></ol>
+        </details>
+        <p class="decision-disclaimer">Demo log only: saved in this browser session and included in session export. Approval does not execute containment or change network traffic.</p>
       </section>
 
       <!-- ================================================================= -->

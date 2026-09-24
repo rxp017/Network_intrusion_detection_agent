@@ -57,8 +57,8 @@ Global gain is separately exposed for model-wide inspection. Neither global gain
 5. Unseen categorical values use all-zero encoding and are disclosed; extreme-but-valid numeric values may be out of distribution.
 6. The two engines and XAI run on CPU; timings are local sequential measurements, not throughput or concurrency guarantees.
 7. Serialized sklearn objects must be trusted. Hashes detect corruption relative to the bundled manifest; they do not authenticate a maliciously replaced bundle.
-8. The application has no authentication, durable incident store, packet capture, SIEM integration, or automated containment.
-9. Narrative text is LLM-generated prose describing the model's own output; it is not an independent judgment and should be read alongside the raw evidence panel, not in place of it.
+8. The application has no authentication, durable incident store, packet capture, SIEM integration, or automated containment. The analyst approval/dismissal demo is saved only in the browser session and exported JSON; approval executes no network action.
+9. Optional narrative text is LLM-generated prose describing the model's own output, not an independent judgment. Direct wrong-class statements are rejected and the model-derived follow-up cannot be overwritten, but free-form prose may still contain errors and must be checked against the evidence panel.
 
 ## Next experiments
 
